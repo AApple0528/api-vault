@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { height: 100%; }
+body {
+  margin: 0;
+  background-color: #E8E6DF;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #141413;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell {
+  /* Responsive viewport shell. The active main row scrolls, while header and
+     navigation occupy their own non-shrinking rows. No fixed pixel height. */
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+}
+.app-content { overscroll-behavior-y: contain; }
+.app-header { padding-top: calc(1.5rem + env(safe-area-inset-top, 0px)); }
+.app-nav { padding-bottom: calc(.625rem + env(safe-area-inset-bottom, 0px)); }
+.app-shell > .fixed > div { padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); }
+/* Android system bars/cutouts are handled at the native WebView boundary. */
+.native-android .app-header { padding-top: 1.5rem; }
+.native-android .app-nav { padding-bottom: .625rem; }
+.native-android .app-shell > .fixed > div { padding-bottom: 1.25rem; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

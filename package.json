@@ -1,0 +1,30 @@
+{
+  "name": "api-vault",
+  "version": "0.3.0",
+  "private": true,
+  "description": "纯本地站点书签与随手记工具",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "cap:sync": "pnpm run build && pnpm exec cap sync",
+    "cap:open:android": "pnpm exec cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.4.3",
+    "@capacitor/browser": "7.0.2",
+    "@capacitor/core": "7.4.3",
+    "@capacitor/filesystem": "7.1.4",
+    "@capacitor/share": "7.0.2",
+    "lucide": "0.468.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.4.3",
+    "autoprefixer": "10.4.20",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.7.2",
+    "vite": "6.0.5"
+  }
+}

@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>API Vault - 站点书签与便签盒</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#F4F3EE',
+            card: '#FAF9F6',
+            border: '#E6E4DD',
+            text: '#141413',
+            muted: '#73726C',
+            accent: '#D97757',
+            accentLight: '#F6E8E3',
+            sage: '#3D6B52',
+            sageLight: '#E6F0EA'
+          },
+          fontFamily: {
+            serif: ['Newsreader', 'Georgia', 'serif'],
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background-color: #E8E6DF; font-family: 'Inter', sans-serif; color: #141413; -webkit-tap-highlight-color: transparent; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="flex justify-center min-h-screen">
+
+  <div class="w-full max-w-[430px] bg-bg min-h-screen flex flex-col relative shadow-2xl border-x border-border overflow-hidden">
+
+    <!-- 顶部栏 -->
+    <header class="px-5 pt-6 pb-4 flex items-center justify-between bg-bg/90 backdrop-blur sticky top-0 z-10 border-b border-border/60">
+      <div>
+        <h1 class="font-serif text-2xl font-semibold tracking-tight text-text">API Vault</h1>
+        <p class="text-[11px] text-muted mt-0.5">纯本地站点书签与随手记</p>
+      </div>
+      <button onclick="openSiteModal()" class="w-9 h-9 rounded-xl bg-accent text-white flex items-center justify-center shadow-sm hover:opacity-90 active:scale-95 transition">
+        <i data-lucide="plus" class="w-5 h-5"></i>
+      </button>
+    </header>
+
+    <!-- 页面 1：站点主视图 -->
+    <main id="view-sites" class="flex-1 overflow-y-auto px-5 pt-4 pb-24 space-y-4">
+
+      <!-- 极简统计看板（三个全部支持点击筛选） -->
+      <div class="grid grid-cols-3 gap-2.5">
+        <div onclick="setCategory('全部')" id="card-stat-all" class="bg-card border border-border rounded-xl p-3 cursor-pointer hover:border-accent/50 transition">
+          <div class="text-[11px] text-muted">总站点</div>
+          <div id="stat-total" class="font-serif text-2xl font-semibold mt-0.5">0</div>
+        </div>
+        <div onclick="setCategory('待签到')" id="card-stat-pending" class="bg-card border border-border rounded-xl p-3 cursor-pointer hover:border-accent/50 transition">
+          <div class="text-[11px] text-muted flex items-center gap-1">
+            今日待签 <span class="w-1.5 h-1.5 rounded-full bg-accent"></span>
+          </div>
+          <div id="stat-pending" class="font-serif text-2xl font-semibold text-accent mt-0.5">0</div>
+        </div>
+        <div onclick="setCategory('已签到')" id="card-stat-done" class="bg-card border border-border rounded-xl p-3 cursor-pointer hover:border-sage/60 transition">
+          <div class="text-[11px] text-muted flex items-center gap-1">
+            今日已签 <span class="w-1.5 h-1.5 rounded-full bg-sage"></span>
+          </div>
+          <div id="stat-done" class="font-serif text-2xl font-semibold text-sage mt-0.5">0</div>
+        </div>
+      </div>
+
+      <!-- 搜索框 -->
+      <div class="relative">
+        <i data-lucide="search" class="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+        <input id="search-input" oninput="renderSites()" type="text" placeholder="搜索站点名称、网址或标签..."
+          class="w-full bg-card border border-border rounded-xl pl-9 pr-4 py-2.5 text-sm placeholder:text-muted/70 focus:outline-none focus:border-accent transition">
+      </div>
+
+      <!-- 分组横向筛选 + 左侧齿轮管理按钮 -->
+      <div class="flex items-center gap-1.5">
+        <button onclick="openGroupModal()" title="管理分组" class="shrink-0 w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center text-muted hover:text-text hover:border-accent transition">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+        </button>
+        <div id="category-tabs" class="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5 flex-1">
+          <!-- JS 动态渲染 -->
+        </div>
+      </div>
+
+      <!-- 站点卡片列表 -->
+      <div id="site-list" class="space-y-3.5">
+        <!-- JS 动态渲染 -->
+      </div>
+
+    </main>
+
+    <!-- 页面 2：“我的”与设置页 -->
+    <main id="view-profile" class="hidden flex-1 overflow-y-auto px-5 pt-4 pb-24 space-y-5">
+
+      <!-- 隐藏的文件上传控件 -->
+      <input id="bookmark-file-input" type="file" accept=".html,.htm,text/html" class="hidden" onchange="handleBookmarkImport(event)">
+      <input id="json-file-input" type="file" accept=".json,application/json" class="hidden" onchange="handleJsonImport(event)">
+
+      <div>
+        <h2 class="text-xs font-medium text-muted uppercase tracking-wider mb-2 px-1">数据管理 (纯本地存储)</h2>
+        <div class="bg-card border border-border rounded-2xl divide-y divide-border overflow-hidden">
+          <button onclick="triggerBookmarkInput()" class="w-full px-4 py-3.5 flex items-center justify-between hover:bg-bg/50 transition text-left">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-bg flex items-center justify-center text-text">
+                <i data-lucide="file-up" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <div class="text-sm font-medium">导入浏览器书签 (.html)</div>
+                <div class="text-[11px] text-muted">解析 Chrome / Edge 书签提取名称与网址</div>
+              </div>
+            </div>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-muted"></i>
+          </button>
+
+          <button onclick="triggerJsonInput()" class="w-full px-4 py-3.5 flex items-center justify-between hover:bg-bg/50 transition text-left">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-bg flex items-center justify-center text-text">
+                <i data-lucide="folder-Input" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <div class="text-sm font-medium">恢复 JSON 备份 (.json)</div>
+                <div class="text-[11px] text-muted">导入此前备份的 JSON 文件恢复站点与便签</div>
+              </div>
+            </div>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-muted"></i>
+          </button>
+
+          <button onclick="exportData('json')" class="w-full px-4 py-3.5 flex items-center justify-between hover:bg-bg/50 transition text-left">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-bg flex items-center justify-center text-text">
+                <i data-lucide="file-json" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <div class="text-sm font-medium">导出完整备份 (.json)</div>
+                <div class="text-[11px] text-muted">包含所有站点与随手记便签，支持分享或复制</div>
+              </div>
+            </div>
+            <i data-lucide="download" class="w-4 h-4 text-muted"></i>
+          </button>
+
+          <button onclick="exportData('md')" class="w-full px-4 py-3.5 flex items-center justify-between hover:bg-bg/50 transition text-left">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-bg flex items-center justify-center text-text">
+                <i data-lucide="file-text" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <div class="text-sm font-medium">导出为可读文档 (.md)</div>
+                <div class="text-[11px] text-muted">生成 Markdown 清单，支持系统分享或复制</div>
+              </div>
+            </div>
+            <i data-lucide="download" class="w-4 h-4 text-muted"></i>
+          </button>
+
+          <button onclick="confirmClearAllData()" class="w-full px-4 py-3.5 flex items-center justify-between hover:bg-red-50/50 transition text-left">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-accentLight/60 flex items-center justify-center text-red-600">
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <div class="text-sm font-medium text-red-600">清空所有站点数据</div>
+                <div class="text-[11px] text-muted">一键清除默认示例或当前全部本地记录</div>
+              </div>
+            </div>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-muted"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 偏好设置 -->
+      <div>
+        <h2 class="text-xs font-medium text-muted uppercase tracking-wider mb-2 px-1">偏好与防窥</h2>
+        <div class="bg-card border border-border rounded-2xl divide-y divide-border overflow-hidden">
+          <div class="px-4 py-3.5 flex items-center justify-between">
+            <div>
+              <div class="text-sm font-medium">便签内容默认打码</div>
+              <div class="text-[11px] text-muted">防止在公共场合打开时被旁人瞄到内容</div>
+            </div>
+            <input id="toggle-mask" type="checkbox" checked onchange="toggleDefaultMask(this.checked)" class="accent-accent w-4 h-4">
+          </div>
+        </div>
+      </div>
+
+      <!-- 关于与版本 -->
+      <div>
+        <h2 class="text-xs font-medium text-muted uppercase tracking-wider mb-2 px-1">关于项目</h2>
+        <div class="bg-card border border-border rounded-2xl divide-y divide-border overflow-hidden">
+          <div class="px-4 py-3.5 flex items-center justify-between">
+            <span class="text-sm font-medium">版本日志 (Changelog)</span>
+            <span class="text-xs text-muted font-mono bg-bg px-2 py-0.5 rounded">v0.3.0</span>
+          </div>
+          <a href="https://github.com" target="_blank" class="px-4 py-3.5 flex items-center justify-between hover:bg-bg/50 transition">
+            <span class="text-sm font-medium">GitHub 开源仓库</span>
+            <i data-lucide="external-link" class="w-4 h-4 text-muted"></i>
+          </a>
+        </div>
+      </div>
+
+      <!-- 免责声明 -->
+      <div class="bg-accentLight/50 border border-accent/20 rounded-2xl p-4 text-xs text-muted leading-relaxed">
+        <div class="font-medium text-text mb-1 flex items-center gap-1.5">
+          <i data-lucide="shield-check" class="w-4 h-4 text-accent"></i> 本地存储与免责声明
+        </div>
+        本应用为纯本地开源工具，无任何后台服务器。您填写的所有站点链接及随手记便签仅保存在当前设备的本地存储（LocalStorage）中。请妥善保管您的设备与导出的备份文件，开发者不对任何数据丢失或泄露承担责任。
+      </div>
+
+    </main>
+
+    <!-- 底部导航 -->
+    <nav class="bg-card/95 backdrop-blur border-t border-border px-6 py-2.5 flex items-center justify-around fixed bottom-0 w-full max-w-[430px] z-20">
+      <button onclick="switchTab('sites')" id="nav-sites" class="flex flex-col items-center gap-1 text-accent font-medium text-xs transition">
+        <i data-lucide="bookmark" class="w-5 h-5"></i>
+        <span>站点</span>
+      </button>
+      <button onclick="switchTab('profile')" id="nav-profile" class="flex flex-col items-center gap-1 text-muted font-medium text-xs transition">
+        <i data-lucide="user" class="w-5 h-5"></i>
+        <span>我的</span>
+      </button>
+    </nav>
+
+    <!-- 弹窗 1：新增 / 编辑站点抽屉 -->
+    <div id="site-modal" class="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-30 hidden flex items-end justify-center">
+      <div class="bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between pb-2 border-b border-border">
+          <button onclick="closeSiteModal()" class="text-sm text-muted hover:text-text">取消</button>
+          <h3 id="site-modal-title" class="font-serif font-semibold text-base">新增站点</h3>
+          <button onclick="saveSite()" class="text-sm font-semibold text-accent">保存</button>
+        </div>
+
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-muted block mb-1">站点名称</label>
+            <input id="form-name" type="text" placeholder="如：SiliconFlow 硅基流动" class="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">跳转网址 (URL)</label>
+            <input id="form-url" type="text" placeholder="https://cloud.siliconflow.cn" class="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div class="grid grid-cols-2 gap-2.5">
+            <div>
+              <label class="text-xs text-muted block mb-1">所属分组</label>
+              <select id="form-group" class="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent">
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-muted block mb-1">标签 (空格或逗号分隔)</label>
+              <input id="form-tags" type="text" placeholder="便宜 速度快" class="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent">
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between bg-bg border border-border rounded-xl px-3.5 py-2.5">
+            <div>
+              <div class="text-sm font-medium">每日签到提醒</div>
+              <div class="text-[11px] text-muted">开启后每天显示打卡状态</div>
+            </div>
+            <input id="form-checkin" type="checkbox" checked class="accent-accent w-4 h-4">
+          </div>
+
+          <!-- 动态增删的随手记便签区 -->
+          <div class="pt-1">
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-xs text-muted">随手记便签 (自由填写，支持一键复制)</label>
+              <button type="button" onclick="addFormNoteRow()" class="text-xs text-accent font-medium flex items-center gap-0.5 hover:opacity-80">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i> 添加便签
+              </button>
+            </div>
+            <div id="form-notes-container" class="space-y-2">
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs text-muted block mb-1">使用说明 / 备注</label>
+            <textarea id="form-desc" rows="2" placeholder="记录模型价格、并发限制或调用方法..." class="w-full bg-bg border border-border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-accent"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 弹窗 2：分组管理弹窗 (增删改) -->
+    <div id="group-modal" class="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-30 hidden flex items-end justify-center">
+      <div class="bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+        <div class="flex items-center justify-between pb-2 border-b border-border">
+          <span class="text-xs text-muted">直接点击名称即可修改</span>
+          <h3 class="font-serif font-semibold text-base">管理自定义分组</h3>
+          <button onclick="closeGroupModal()" class="text-sm font-semibold text-accent">完成</button>
+        </div>
+
+        <div class="flex gap-2">
+          <input id="new-group-input" type="text" placeholder="输入新分组名称 (如：自建节点)..." class="flex-1 bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          <button onclick="addCustomGroup()" class="px-4 py-2 rounded-xl bg-accent text-white text-xs font-medium shrink-0">新增</button>
+        </div>
+
+        <div id="group-manage-list" class="space-y-2">
+        </div>
+      </div>
+    </div>
+
+    <!-- 弹窗 3：通用确认 / 校验报告弹窗 -->
+    <div id="dialog-modal" class="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-40 hidden flex items-center justify-center px-6">
+      <div class="bg-card w-full max-w-[360px] rounded-2xl border border-border p-5 space-y-4 shadow-xl">
+        <h4 id="dialog-title" class="font-serif font-semibold text-base text-text">提示</h4>
+        <p id="dialog-msg" class="text-xs text-muted leading-relaxed whitespace-pre-line"></p>
+        <div id="dialog-actions" class="flex justify-end gap-2 pt-1">
+        </div>
+      </div>
+    </div>
+
+    <!-- 弹窗 4：手机端导出预览与系统分享弹窗 -->
+    <div id="export-modal" class="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-40 hidden flex items-end justify-center">
+      <div class="bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-3 max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between pb-2 border-b border-border">
+          <button onclick="closeExportModal()" class="text-sm text-muted">关闭</button>
+          <h3 id="export-modal-title" class="font-serif font-semibold text-base">导出数据</h3>
+          <button onclick="copyExportContent()" class="text-sm font-semibold text-accent">一键复制</button>
+        </div>
+        <p class="text-[11px] text-muted">若沙盒或手机浏览器拦截了直接下载，您可点击「一键复制」粘贴保存，或点击下方「调用手机系统分享/另存为」：</p>
+        <textarea id="export-textarea" readonly class="w-full flex-1 min-h-[200px] bg-bg border border-border rounded-xl p-3 text-[11px] font-mono focus:outline-none"></textarea>
+        <div class="grid grid-cols-2 gap-2.5 pt-1">
+          <button id="export-share-btn" class="py-2.5 rounded-xl bg-bg border border-border text-text text-xs font-medium hover:border-accent transition">系统分享 / 另存文件</button>
+          <button id="export-download-btn" class="py-2.5 rounded-xl bg-accent text-white text-xs font-medium">浏览器直接下载</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 轻提示 Toast -->
+    <div id="toast" class="fixed top-5 left-1/2 -translate-x-1/2 bg-text text-card text-xs px-4 py-2 rounded-full shadow-lg opacity-0 pointer-events-none transition-opacity z-50">
+      已复制到剪贴板
+    </div>
+
+  </div>
+
+  <script>
+    const STORAGE_KEY_SITES = 'api_vault_sites_v3';
+    const STORAGE_KEY_GROUPS = 'api_vault_groups_v3';
+
+    let defaultMask = true;
+    let currentCategory = '全部';
+    let editingSiteId = null;
+    let tempFormNotes = [];
+
+    let customGroups = JSON.parse(localStorage.getItem(STORAGE_KEY_GROUPS)) || ['主力站', '白嫖备用', '公益站'];
+
+    const defaultSampleSites = [
+      {
+        id: 1,
+        name: 'SiliconFlow 硅基流动',
+        url: 'https://cloud.siliconflow.cn',
+        group: '主力站',
+        tags: ['主力', 'DeepSeek满血'],
+        needCheckIn: true,
+        checkedInToday: false,
+        notes: [
+          { label: '主用凭证', value: 'sk-sf-89f23a90c11b4e7d', masked: true },
+          { label: '登录账号', value: 'pingping@studio.com', masked: false }
+        ],
+        desc: '平时拆剧本主力站，新号送14块钱额度。'
+      },
+      {
+        id: 2,
+        name: 'OpenRouter',
+        url: 'https://openrouter.ai',
+        group: '主力站',
+        tags: ['模型全', '按量计费'],
+        needCheckIn: false,
+        checkedInToday: false,
+        notes: [
+          { label: '默认串码', value: 'sk-or-v1-7782910a9x', masked: true }
+        ],
+        desc: '用来调各种冷门模型对比效果。'
+      },
+      {
+        id: 3,
+        name: 'LinuxDo 公益中转',
+        url: 'https://linux.do',
+        group: '公益站',
+        tags: ['每日签到', '白嫖'],
+        needCheckIn: true,
+        checkedInToday: true,
+        notes: [
+          { label: '福利码', value: 'sk-free-992011a', masked: true },
+          { label: '密码备忘', value: 'Jiang180cm!', masked: true }
+        ],
+        desc: '每天零点刷新签到领额度，偶尔抽风。'
+      }
+    ];
+
+    let storedSites = localStorage.getItem(STORAGE_KEY_SITES);
+    let sites = storedSites !== null ? JSON.parse(storedSites) : defaultSampleSites;
+
+    function saveToStorage() {
+      localStorage.setItem(STORAGE_KEY_SITES, JSON.stringify(sites));
+      localStorage.setItem(STORAGE_KEY_GROUPS, JSON.stringify(customGroups));
+    }
+
+    function getAllFilterTabs() {
+      return ['全部', '待签到', '已签到', ...customGroups];
+    }
+
+    function renderCategories() {
+      const container = document.getElementById('category-tabs');
+      const tabs = getAllFilterTabs();
+      if (!tabs.includes(currentCategory)) currentCategory = '全部';
+
+      container.innerHTML = tabs.map(cat => {
+        const active = cat === currentCategory;
+        return `<button onclick="setCategory('${cat}')" class="px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition ${ active ? 'bg-text text-card shadow-sm' : 'bg-card border border-border text-muted hover:text-text' }">${cat}</button>`;
+      }).join('');
+
+      document.getElementById('card-stat-all').classList.toggle('border-accent', currentCategory === '全部');
+      document.getElementById('card-stat-pending').classList.toggle('border-accent', currentCategory === '待签到');
+      document.getElementById('card-stat-done').classList.toggle('border-sage', currentCategory === '已签到');
+    }
+
+    function setCategory(cat) {
+      currentCategory = cat;
+      renderCategories();
+      renderSites();
+    }
+
+    function updateStats() {
+      document.getElementById('stat-total').innerText = sites.length;
+      const pending = sites.filter(s => s.needCheckIn && !s.checkedInToday).length;
+      const done = sites.filter(s => s.needCheckIn && s.checkedInToday).length;
+      document.getElementById('stat-pending').innerText = pending;
+      document.getElementById('stat-done').innerText = done;
+    }
+
+    function maskString(str) {
+      if (!str) return '';
+      if (str.length <= 6) return '••••••';
+      return str.slice(0, 4) + '••••' + str.slice(-3);
+    }
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
+
+    function renderSites() {
+      updateStats();
+      const q = document.getElementById('search-input').value.trim().toLowerCase();
+      const list = document.getElementById('site-list');
+
+      const filtered = sites.filter(s => {
+        const matchCat =
+          currentCategory === '全部' ? true :
+          currentCategory === '待签到' ? (s.needCheckIn && !s.checkedInToday) :
+          currentCategory === '已签到' ? (s.needCheckIn && s.checkedInToday) :
+          s.group === currentCategory;
+        const matchQ = !q || s.name.toLowerCase().includes(q) || s.url.toLowerCase().includes(q) || (s.tags || []).some(t => t.toLowerCase().includes(q));
+        return matchCat && matchQ;
+      });
+
+      if (filtered.length === 0) {
+        list.innerHTML = `<div class="text-center py-12 text-xs text-muted">当前「${escapeHtml(currentCategory)}」下没有匹配的站点书签</div>`;
+        return;
+      }
+
+      list.innerHTML = filtered.map(site => `
+        <div class="bg-card border border-border rounded-2xl p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-3">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <a href="${escapeHtml(site.url)}" target="_blank" class="font-serif font-semibold text-base text-text hover:text-accent transition inline-flex items-center gap-1 max-w-full">
+                <span class="truncate">${escapeHtml(site.name)}</span>
+                <i data-lucide="arrow-up-right" class="w-4 h-4 text-muted shrink-0"></i>
+              </a>
+              <div class="text-[11px] text-muted font-mono mt-0.5 truncate">${escapeHtml(site.url.replace(/^https?:\/\//, ''))}</div>
+            </div>
+
+            ${site.needCheckIn ? `
+              <button onclick="toggleCheckIn(${site.id})" class="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium flex items-center gap-1 transition ${
+                site.checkedInToday
+                  ? 'bg-sageLight text-sage'
+                  : 'bg-accentLight text-accent hover:opacity-80'
+              }">
+                <i data-lucide="${site.checkedInToday ? 'check-circle-2' : 'clock'}" class="w-3.5 h-3.5"></i>
+                ${site.checkedInToday ? '今日已签' : '去签到'}
+              </button>
+            ` : ''}
+          </div>
+
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-[10px] font-medium px-2 py-0.5 rounded-md bg-bg border border-border text-text">${escapeHtml(site.group)}</span>${(site.tags || []).map(t => `<span class="text-[10px] text-muted px-2 py-0.5 rounded-md bg-bg">#${escapeHtml(t)}</span>`).join('')}
+          </div>
+
+          ${site.notes && site.notes.length > 0 ? `
+            <div class="bg-bg/70 rounded-xl p-2.5 space-y-2 border border-border/70">
+              ${site.notes.map((n, idx) => `
+                <div class="flex items-center justify-between text-xs gap-2">
+                  <span class="text-muted shrink-0 max-w-[90px] truncate">${escapeHtml(n.label)}</span>
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="font-mono text-[11px] truncate text-text">${n.masked ? maskString(n.value) : escapeHtml(n.value)}</span>
+                    <button onclick="toggleNoteMask(${site.id},${idx})" class="p-1 text-muted hover:text-text" title="显示/隐藏">
+                      <i data-lucide="${n.masked ? 'eye-off' : 'eye'}" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button onclick="copyText('${escapeHtml(n.value).replace(/'/g, "\\'")}')" class="px-2 py-0.5 rounded bg-card border border-border text-[11px] text-text hover:border-accent transition shrink-0">
+                      复制
+                    </button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+
+          <div class="flex items-center justify-between pt-1 text-[11px] text-muted border-t border-border/50">
+            <span class="truncate pr-3">${escapeHtml(site.desc || '暂无备注')}</span>
+            <div class="flex items-center gap-3 shrink-0">
+              <button onclick="openSiteModal(${site.id})" class="text-text hover:text-accent font-medium">编辑</button>
+              <button onclick="confirmDeleteSite(${site.id})" class="text-muted hover:text-red-600">删除</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      lucide.createIcons();
+    }
+
+    function toggleCheckIn(id) {
+      const s = sites.find(item => item.id === id);
+      if (!s) return;
+      if (!s.checkedInToday) {
+        window.open(s.url, '_blank');
+        s.checkedInToday = true;
+        showToast('已打开站点并标记为「今日已签」');
+      } else {
+        s.checkedInToday = false;
+        showToast('已重置为「待签到」');
+      }
+      saveToStorage();
+      renderSites();
+    }
+
+    function toggleNoteMask(siteId, noteIdx) {
+      const s = sites.find(item => item.id === siteId);
+      if (s && s.notes[noteIdx]) {
+        s.notes[noteIdx].masked = !s.notes[noteIdx].masked;
+        saveToStorage();
+        renderSites();
+      }
+    }
+
+    function toggleDefaultMask(checked) {
+      defaultMask = checked;
+      sites.forEach(s => (s.notes || []).forEach(n => n.masked = checked));
+      saveToStorage();
+      renderSites();
+      showToast(checked ? '已开启全部便签打码' : '已显示全部便签明文');
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => showToast('已复制到剪贴板')).catch(() => fallbackCopy(text));
+      } else {
+        fallbackCopy(text);
+      }
+    }
+
+    function fallbackCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('已复制到剪贴板');
+    }
+
+    function confirmDeleteSite(id) {
+      const s = sites.find(item => item.id === id);
+      if (!s) return;
+      showDialog(
+        '确认删除站点？',
+        `即将删除「${s.name}」及其包含的所有随手记便签，删除后不可恢复。`,
+        [
+          { text: '取消', class: 'px-3.5 py-1.5 rounded-xl bg-bg text-muted text-xs', action: closeDialog },
+          { text: '确认删除', class: 'px-3.5 py-1.5 rounded-xl bg-red-600 text-white text-xs font-medium', action: () => {
+            sites = sites.filter(item => item.id !== id);
+            saveToStorage();
+            renderSites();
+            closeDialog();
+            showToast('已删除该站点');
+          }}
+        ]
+      );
+    }
+
+    function confirmClearAllData() {
+      showDialog(
+        '清空所有站点数据？',
+        '此操作将彻底清空当前所有的站点书签与随手记便签（非常适合在正式使用前清理默认示例数据）。请确认是否继续？',
+        [
+          { text: '取消', class: 'px-3.5 py-1.5 rounded-xl bg-bg text-muted text-xs', action: closeDialog },
+          { text: '确认清空', class: 'px-3.5 py-1.5 rounded-xl bg-red-600 text-white text-xs font-medium', action: () => {
+            sites = [];
+            saveToStorage();
+            renderSites();
+            closeDialog();
+            showToast('已清空全部站点数据');
+          }}
+        ]
+      );
+    }
+
+    function populateGroupSelect(selectedGroup) {
+      const select = document.getElementById('form-group');
+      select.innerHTML = customGroups.map(g => `<option value="${escapeHtml(g)}" ${g === selectedGroup ? 'selected' : ''}>${escapeHtml(g)}</option>`).join('');
+    }
+
+    function renderFormNotes() {
+      const container = document.getElementById('form-notes-container');
+      container.innerHTML = tempFormNotes.map((note, idx) => `
+        <div class="flex items-center gap-2">
+          <input type="text" value="${escapeHtml(note.label)}" oninput="tempFormNotes[${idx}].label = this.value" placeholder="标签" class="w-24 bg-bg border border-border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-accent">
+          <input type="text" value="${escapeHtml(note.value)}" oninput="tempFormNotes[${idx}].value = this.value" placeholder="填写内容 (如 sk-xxx 或账号)..." class="flex-1 bg-bg border border-border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-accent">
+          <button type="button" onclick="removeFormNoteRow(${idx})" class="p-1.5 text-muted hover:text-red-600 shrink-0" title="删除此行">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    function addFormNoteRow() {
+      tempFormNotes.push({ label: `便签 ${tempFormNotes.length + 1}`, value: '' });
+      renderFormNotes();
+    }
+
+    function removeFormNoteRow(idx) {
+      if (tempFormNotes.length <= 1) {
+        tempFormNotes[0] = { label: '便签 1', value: '' };
+      } else {
+        tempFormNotes.splice(idx, 1);
+      }
+      renderFormNotes();
+    }
+
+    function openSiteModal(siteId = null) {
+      editingSiteId = siteId;
+      const titleEl = document.getElementById('site-modal-title');
+
+      if (siteId) {
+        const s = sites.find(item => item.id === siteId);
+        if (!s) return;
+        titleEl.innerText = '编辑站点';
+        document.getElementById('form-name').value = s.name;
+        document.getElementById('form-url').value = s.url;
+        populateGroupSelect(s.group);
+        document.getElementById('form-tags').value = (s.tags || []).join(' ');
+        document.getElementById('form-checkin').checked = !!s.needCheckIn;
+        document.getElementById('form-desc').value = s.desc || '';
+        tempFormNotes = (s.notes && s.notes.length > 0)
+          ? s.notes.map(n => ({ label: n.label, value: n.value }))
+          : [{ label: '便签 1', value: '' }, { label: '便签 2', value: '' }];
+      } else {
+        titleEl.innerText = '新增站点';
+        document.getElementById('form-name').value = '';
+        document.getElementById('form-url').value = '';
+        populateGroupSelect(customGroups[0] || '默认分组');
+        document.getElementById('form-tags').value = '';
+        document.getElementById('form-checkin').checked = true;
+        document.getElementById('form-desc').value = '';
+        tempFormNotes = [
+          { label: '便签 1', value: '' },
+          { label: '便签 2', value: '' }
+        ];
+      }
+
+      renderFormNotes();
+      document.getElementById('site-modal').classList.remove('hidden');
+    }
+
+    function closeSiteModal() {
+      document.getElementById('site-modal').classList.add('hidden');
+      editingSiteId = null;
+    }
+
+    function saveSite() {
+      const name = document.getElementById('form-name').value.trim() || '未命名站点';
+      let url = document.getElementById('form-url').value.trim() || 'https://example.com';
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+      const group = document.getElementById('form-group').value || customGroups[0] || '默认分组';
+      const tagsRaw = document.getElementById('form-tags').value.trim();
+      const tags = tagsRaw ? tagsRaw.split(/[\s,，]+/).filter(Boolean) : [];
+      const needCheckIn = document.getElementById('form-checkin').checked;
+      const desc = document.getElementById('form-desc').value.trim();
+
+      const validNotes = tempFormNotes
+        .filter(n => n.label.trim() || n.value.trim())
+        .map((n, i) => ({
+          label: n.label.trim() || `便签 ${i + 1}`,
+          value: n.value.trim() || '暂无内容',
+          masked: defaultMask
+        }));
+
+      if (editingSiteId) {
+        const idx = sites.findIndex(item => item.id === editingSiteId);
+        if (idx !== -1) {
+          sites[idx] = {
+            ...sites[idx],
+            name, url, group, tags, needCheckIn,
+            notes: validNotes,
+            desc
+          };
+        }
+        showToast('站点修改已保存');
+      } else {
+        sites.unshift({
+          id: Date.now(),
+          name, url, group, tags, needCheckIn,
+          checkedInToday: false,
+          notes: validNotes,
+          desc
+        });
+        showToast('新站点已添加');
+      }
+
+      saveToStorage();
+      closeSiteModal();
+      renderCategories();
+      renderSites();
+    }
+
+    function openGroupModal() {
+      document.getElementById('new-group-input').value = '';
+      renderGroupManageList();
+      document.getElementById('group-modal').classList.remove('hidden');
+    }
+
+    function closeGroupModal() {
+      document.getElementById('group-modal').classList.add('hidden');
+      renderCategories();
+      renderSites();
+    }
+
+    function renderGroupManageList() {
+      const list = document.getElementById('group-manage-list');
+      list.innerHTML = customGroups.map((g, idx) => `
+        <div class="flex items-center justify-between bg-bg border border-border rounded-xl px-3 py-2">
+          <input type="text" value="${escapeHtml(g)}" onchange="renameCustomGroup(${idx}, this.value)" class="bg-transparent text-sm font-medium focus:outline-none focus:text-accent flex-1 mr-2">
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-[11px] text-muted">${sites.filter(s => s.group === g).length} 个站点</span>
+            <button onclick="deleteCustomGroup(${idx})" class="p-1 text-muted hover:text-red-600" title="删除分组">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    function addCustomGroup() {
+      const input = document.getElementById('new-group-input');
+      const val = input.value.trim();
+      if (!val) return showToast('请输入分组名称');
+      if (['全部', '待签到', '已签到', ...customGroups].includes(val)) {
+        return showToast('该分组名称已存在');
+      }
+      customGroups.push(val);
+      input.value = '';
+      saveToStorage();
+      renderGroupManageList();
+      showToast('已添加分组');
+    }
+
+    function renameCustomGroup(idx, newName) {
+      const val = newName.trim();
+      const oldName = customGroups[idx];
+      if (!val || val === oldName) return renderGroupManageList();
+      if (['全部', '待签到', '已签到', ...customGroups].includes(val)) {
+        showToast('分组名称冲突');
+        return renderGroupManageList();
+      }
+      customGroups[idx] = val;
+      sites.forEach(s => { if (s.group === oldName) s.group = val; });
+      if (currentCategory === oldName) currentCategory = val;
+      saveToStorage();
+      renderGroupManageList();
+      showToast(`已重命名为「${val}」`);
+    }
+
+    function deleteCustomGroup(idx) {
+      if (customGroups.length <= 1) {
+        return showToast('至少需要保留一个自定义分组');
+      }
+      const target = customGroups[idx];
+      const fallback = customGroups.find((_, i) => i !== idx);
+      customGroups.splice(idx, 1);
+      sites.forEach(s => { if (s.group === target) s.group = fallback; });
+      if (currentCategory === target) currentCategory = '全部';
+      saveToStorage();
+      renderGroupManageList();
+      showToast(`已删除「${target}」，原站点已移至「${fallback}」`);
+    }
+
+    function triggerBookmarkInput() {
+      const input = document.getElementById('bookmark-file-input');
+      input.value = '';
+      input.click();
+    }
+
+    function handleBookmarkImport(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      const fileName = file.name.toLowerCase();
+      if (!fileName.endsWith('.html') && !fileName.endsWith('.htm')) {
+        return showDialog('文件格式错误', `您选择的文件「${file.name}」不是有效的浏览器书签文件。\n请上传 .html 或 .htm 格式文件。`, [
+          { text: '知道了', class: 'px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-medium', action: closeDialog }
+        ]);
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const content = e.target.result || '';
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(content, 'text/html');
+        const links = Array.from(doc.querySelectorAll('a'));
+
+        if (links.length === 0) {
+          return showDialog('导入校验失败', '未在该文件中检测到任何有效的书签链接，请确认文件内容是否正确。', [
+            { text: '关闭', class: 'px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-medium', action: closeDialog }
+          ]);
+        }
+
+        let importedCount = 0;
+        let skippedCount = 0;
+        const defaultGroup = customGroups[0] || '主力站';
+
+        links.forEach((a, idx) => {
+          const href = (a.getAttribute('href') || '').trim();
+          const title = (a.textContent || '').trim() || '未命名书签';
+
+          if (!/^https?:\/\//i.test(href)) {
+            skippedCount++;
+            return;
+          }
+
+          let folderTag = '书签导入';
+          const parentDl = a.closest('dl');
+          if (parentDl && parentDl.previousElementSibling && parentDl.previousElementSibling.tagName === 'H3') {
+            folderTag = parentDl.previousElementSibling.textContent.trim() || '书签导入';
+          }
+
+          sites.unshift({
+            id: Date.now() + idx,
+            name: title,
+            url: href,
+            group: defaultGroup,
+            tags: [folderTag],
+            needCheckIn: false,
+            checkedInToday: false,
+            notes: [
+              { label: '便签 1', value: '暂无内容', masked: false }
+            ],
+            desc: '由浏览器书签自动导入'
+          });
+          importedCount++;
+        });
+
+        saveToStorage();
+        renderCategories();
+        renderSites();
+
+        showDialog(
+          '书签导入校验完成',
+          `文件名称：${file.name}\n成功导入：${importedCount} 条站点（已归入「${defaultGroup}」）\n过滤无效链接：${skippedCount} 条`,
+          [
+            { text: '去看站点', class: 'px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-medium', action: () => {
+              closeDialog();
+              switchTab('sites');
+            }}
+          ]
+        );
+      };
+      reader.readAsText(file);
+    }
+
+    // 导入 JSON 备份文件恢复数据
+    function triggerJsonInput() {
+      const input = document.getElementById('json-file-input');
+      input.value = '';
+      input.click();
+    }
+
+    function handleJsonImport(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = JSON.parse(e.target.result || '{}');
+          if (!Array.isArray(data.sites)) {
+            throw new Error('缺少 sites 数组');
+          }
+          if (Array.isArray(data.groups) && data.groups.length > 0) {
+            customGroups = data.groups;
+          }
+          sites = data.sites;
+          saveToStorage();
+          renderCategories();
+          renderSites();
+          showDialog(
+            'JSON 备份恢复成功',
+            `已从「${file.name}」成功恢复 ${sites.length} 个站点及 ${customGroups.length} 个自定义分组。`,
+            [
+              { text: '完成', class: 'px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-medium', action: () => {
+                closeDialog();
+                switchTab('sites');
+              }}
+            ]
+          );
+        } catch (err) {
+          showDialog('JSON 校验失败', '所选文件不是有效的 API Vault 备份格式，请检查文件是否正确。', [
+            { text: '关闭', class: 'px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-medium', action: closeDialog }
+          ]);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // 导出 JSON / Markdown（避免竖线转义 + 增加系统级 Share 文件能力）
+    function exportData(type) {
+      let content = '';
+      let filename = '';
+      let mime = 'text/plain;charset=utf-8';
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const sep = String.fromCharCode(124);
+
+      if (type === 'json') {
+        content = JSON.stringify({ version: '0.3.0', exportedAt: new Date().toISOString(), groups: customGroups, sites }, null, 2);
+        filename = `api-vault-backup-${dateStr}.json`;
+        mime = 'application/json;charset=utf-8';
+        document.getElementById('export-modal-title').innerText = '导出 JSON 备份';
+      } else {
+        const lines = [
+          `# API Vault 站点书签清单`,
+          `> 导出时间：${dateStr} ${sep} 总站点数：${sites.length}`,
+          ``
+        ];
+        sites.forEach((s, i) => {
+          lines.push(`## ${i + 1}. [${s.name}](${s.url})`);
+          lines.push(`- **分组**：${s.group} ${sep} **标签**：${(s.tags || []).join(', ') || '无'} ${sep} **每日签到**：${s.needCheckIn ? (s.checkedInToday ? '今日已签' : '待签到') : '无需签到'}`);
+          if (s.notes && s.notes.length) {
+            lines.push(`- **随手记便签**：`);
+            s.notes.forEach(n => lines.push(`  - \`${n.label}\`: \`${n.value}\``));
+          }
+          if (s.desc) lines.push(`- **备注**：${s.desc}`);
+          lines.push(``);
+        });
+        content = lines.join('\n');
+        filename = `api-vault-list-${dateStr}.md`;
+        mime = 'text/markdown;charset=utf-8';
+        document.getElementById('export-modal-title').innerText = '导出 Markdown 文档';
+      }
+
+      document.getElementById('export-textarea').value = content;
+      document.getElementById('export-modal').classList.remove('hidden');
+
+      const triggerDownload = () => {
+        const blob = new Blob([content], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        showToast(`已请求浏览器下载：${filename}`);
+      };
+
+      const triggerSystemShare = async () => {
+        try {
+          const file = new File([content], filename, { type: 'text/plain' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: filename });
+            return;
+          }
+          if (navigator.share) {
+            await navigator.share({ title: filename, text: content });
+            return;
+          }
+          copyText(content);
+        } catch (e) {
+          copyText(content);
+        }
+      };
+
+      document.getElementById('export-download-btn').onclick = triggerDownload;
+      document.getElementById('export-share-btn').onclick = triggerSystemShare;
+      triggerDownload();
+    }
+
+    function closeExportModal() {
+      document.getElementById('export-modal').classList.add('hidden');
+    }
+
+    function copyExportContent() {
+      const val = document.getElementById('export-textarea').value;
+      copyText(val);
+    }
+
+    function showDialog(title, msg, actions) {
+      document.getElementById('dialog-title').innerText = title;
+      document.getElementById('dialog-msg').innerText = msg;
+      const actContainer = document.getElementById('dialog-actions');
+      actContainer.innerHTML = '';
+      actions.forEach(act => {
+        const btn = document.createElement('button');
+        btn.className = act.class;
+        btn.innerText = act.text;
+        btn.onclick = act.action;
+        actContainer.appendChild(btn);
+      });
+      document.getElementById('dialog-modal').classList.remove('hidden');
+    }
+
+    function closeDialog() {
+      document.getElementById('dialog-modal').classList.add('hidden');
+    }
+
+    function switchTab(tab) {
+      const isSites = tab === 'sites';
+      document.getElementById('view-sites').classList.toggle('hidden', !isSites);
+      document.getElementById('view-profile').classList.toggle('hidden', isSites);
+      document.getElementById('nav-sites').className = `flex flex-col items-center gap-1 font-medium text-xs transition ${isSites ? 'text-accent' : 'text-muted'}`;
+      document.getElementById('nav-profile').className = `flex flex-col items-center gap-1 font-medium text-xs transition ${!isSites ? 'text-accent' : 'text-muted'}`;
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.classList.remove('opacity-0');
+      setTimeout(() => t.classList.add('opacity-0'), 1800);
+    }
+
+    renderCategories();
+    renderSites();
+    lucide.createIcons();
+  </script>
+</body>
+</html>

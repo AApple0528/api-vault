@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">API Vault</string>
+    <string name="title_activity_main">API Vault</string>
+    <string name="package_name">app.apivault.local</string>
+    <string name="custom_url_scheme">app.apivault.local</string>
+</resources>

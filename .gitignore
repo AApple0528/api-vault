@@ -1,0 +1,35 @@
+node_modules/
+dist/
+.vite/
+.idea/
+*.iml
+android/.gradle/
+android/local.properties
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/
+*.keystore
+*.jks
+*.apk
+*.aab
+.env
+.env.*
+!.env.example
+
+# Package manager cache
+.pnpm-store/
+
+# Android native build cache
+android/.cxx/
+android/.externalNativeBuild/
+
+# Local environment and signing files
+local.properties
+*.pem
+*.p12
+*.pfx
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
