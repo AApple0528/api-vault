@@ -9,6 +9,55 @@ const DocumentSaver = registerPlugin('DocumentSaver');
 const isAndroid = Capacitor.getPlatform() === 'android';
 if (isAndroid) document.documentElement.classList.add('native-android');
 
+const PROJECT_REPOSITORY_URL = 'https://github.com/AApple0528/api-vault';
+let viewportUpdateFrame = 0;
+let focusVisibilityTimer = 0;
+
+function keepControlVisible(control) {
+  if (!(control instanceof HTMLElement)) return;
+  const modal = control.closest('.keyboard-aware-modal');
+  const panel = control.closest('.app-modal-panel');
+  if (!modal || modal.classList.contains('hidden') || !panel) return;
+
+  const panelRect = panel.getBoundingClientRect();
+  const headerRect = panel.querySelector('.app-modal-header')?.getBoundingClientRect();
+  const controlRect = control.getBoundingClientRect();
+  const visibleTop = Math.max(panelRect.top + 12, (headerRect?.bottom || panelRect.top) + 8);
+  const visibleBottom = panelRect.bottom - 16;
+
+  if (controlRect.bottom > visibleBottom) {
+    panel.scrollBy({ top: controlRect.bottom - visibleBottom, behavior: 'smooth' });
+  } else if (controlRect.top < visibleTop) {
+    panel.scrollBy({ top: controlRect.top - visibleTop, behavior: 'smooth' });
+  }
+}
+
+function queueFocusedControlVisibility(control = document.activeElement) {
+  if (!(control instanceof HTMLElement) || !control.closest('.keyboard-aware-modal')) return;
+  requestAnimationFrame(() => keepControlVisible(control));
+  window.clearTimeout(focusVisibilityTimer);
+  focusVisibilityTimer = window.setTimeout(() => keepControlVisible(control), 280);
+}
+
+function syncVisualViewport() {
+  if (viewportUpdateFrame) return;
+  viewportUpdateFrame = requestAnimationFrame(() => {
+    viewportUpdateFrame = 0;
+    const viewport = window.visualViewport;
+    const height = Math.max(1, viewport?.height || window.innerHeight);
+    const offsetTop = Math.max(0, viewport?.offsetTop || 0);
+    document.documentElement.style.setProperty('--app-visual-viewport-height', `${height}px`);
+    document.documentElement.style.setProperty('--app-visual-viewport-top', `${offsetTop}px`);
+    queueFocusedControlVisibility();
+  });
+}
+
+syncVisualViewport();
+window.addEventListener('resize', syncVisualViewport);
+window.visualViewport?.addEventListener('resize', syncVisualViewport);
+window.visualViewport?.addEventListener('scroll', syncVisualViewport);
+document.addEventListener('focusin', event => queueFocusedControlVisibility(event.target));
+
 const exportActions = createExportActions({
   preview({ content, title }) {
     document.getElementById('export-modal-title').textContent = title;
@@ -195,6 +244,15 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       } else {
         window.open(safeUrl, '_blank', 'noopener,noreferrer');
       }
+    }
+
+    function openProjectRepository(event) {
+      event?.preventDefault();
+      openSiteLink(PROJECT_REPOSITORY_URL);
+    }
+
+    function copyProjectRepository() {
+      copyText(PROJECT_REPOSITORY_URL);
     }
 
     function updateStats() {
@@ -726,7 +784,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       const sep = String.fromCharCode(124);
 
       if (type === 'json') {
-        content = JSON.stringify({ version: '0.3.0', exportedAt: new Date().toISOString(), groups: customGroups, sites }, null, 2);
+        content = JSON.stringify({ version: '0.3.1', exportedAt: new Date().toISOString(), groups: customGroups, sites }, null, 2);
         filename = `api-vault-backup-${dateStr}.json`;
         mime = 'application/json;charset=utf-8';
       } else {
@@ -804,9 +862,9 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     Object.assign(globalThis, {
       addCustomGroup, addFormNoteRow, closeDialog, closeExportModal, closeGroupModal,
       closeSiteModal, confirmClearAllData, confirmDeleteSite, copyExportContent,
-      copySiteNote, copyText, deleteCustomGroup, exportData, handleBookmarkImport,
+      copyProjectRepository, copySiteNote, copyText, deleteCustomGroup, exportData, handleBookmarkImport,
       handleJsonImport, openGroupModal, openSiteLink, openSiteModal, removeFormNoteRow,
-      renderSites, renameCustomGroup, saveSite, setCategory, setCategoryByIndex,
+      openProjectRepository, renderSites, renameCustomGroup, saveSite, setCategory, setCategoryByIndex,
       switchTab, toggleDefaultMask, toggleCheckIn, toggleNoteMask, updateFormNote, triggerBookmarkInput,
       triggerJsonInput
     });

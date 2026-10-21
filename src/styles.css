@@ -27,5 +27,30 @@ body {
 .native-android .app-nav { padding-bottom: .625rem; }
 .native-android .app-shell > .fixed > div { padding-bottom: 1.25rem; }
 
+/* Keep overlays inside the visual viewport while the on-screen keyboard is
+   open. JavaScript updates these variables from VisualViewport where
+   available; the fallbacks keep ordinary browsers working unchanged. */
+.app-modal {
+  top: var(--app-visual-viewport-top, 0px);
+  bottom: auto;
+  height: var(--app-visual-viewport-height, 100dvh);
+}
+.app-modal-panel {
+  max-height: calc(var(--app-visual-viewport-height, 100dvh) - .75rem);
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.app-modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: #FAF9F6;
+}
+.keyboard-aware-modal input,
+.keyboard-aware-modal textarea,
+.keyboard-aware-modal select {
+  scroll-margin-block: 4.5rem 5rem;
+}
+
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

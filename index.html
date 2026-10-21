@@ -165,12 +165,18 @@
         <div class="bg-card border border-border rounded-2xl divide-y divide-border overflow-hidden">
           <div class="px-4 py-3.5 flex items-center justify-between">
             <span class="text-sm font-medium">版本日志 (Changelog)</span>
-            <span class="text-xs text-muted font-mono bg-bg px-2 py-0.5 rounded">v0.3.0</span>
+            <span class="text-xs text-muted font-mono bg-bg px-2 py-0.5 rounded">v0.3.1</span>
           </div>
-          <a href="https://github.com" target="_blank" class="px-4 py-3.5 flex items-center justify-between hover:bg-bg/50 transition">
-            <span class="text-sm font-medium">GitHub 开源仓库</span>
-            <i data-lucide="external-link" class="w-4 h-4 text-muted"></i>
-          </a>
+          <div class="px-4 py-3.5 flex items-start gap-3">
+            <a href="https://github.com/AApple0528/api-vault" onclick="openProjectRepository(event)" target="_blank" rel="noopener noreferrer" class="min-w-0 flex-1 hover:opacity-80 transition">
+              <span class="flex items-center gap-1.5 text-sm font-medium">
+                开源地址
+                <i data-lucide="external-link" class="w-4 h-4 text-muted shrink-0"></i>
+              </span>
+              <span class="block mt-1 text-[11px] leading-relaxed text-muted font-mono break-all select-all">https://github.com/AApple0528/api-vault</span>
+            </a>
+            <button type="button" onclick="copyProjectRepository()" class="shrink-0 px-2.5 py-1.5 rounded-lg bg-bg border border-border text-xs text-muted hover:text-text hover:border-accent transition" aria-label="复制开源仓库地址">复制</button>
+          </div>
         </div>
       </div>
 
@@ -197,9 +203,9 @@
     </nav>
 
     <!-- 弹窗 1：新增 / 编辑站点抽屉 -->
-    <div id="site-modal" class="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-30 hidden flex items-end justify-center">
-      <div class="bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-4 max-h-[90vh] overflow-y-auto">
-        <div class="flex items-center justify-between pb-2 border-b border-border">
+    <div id="site-modal" class="app-modal keyboard-aware-modal fixed inset-0 bg-black/40 backdrop-blur-[2px] z-30 hidden flex items-end justify-center">
+      <div class="app-modal-panel bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div class="app-modal-header flex items-center justify-between pb-2 border-b border-border">
           <button onclick="closeSiteModal()" class="text-sm text-muted hover:text-text">取消</button>
           <h3 id="site-modal-title" class="font-serif font-semibold text-base">新增站点</h3>
           <button onclick="saveSite()" class="text-sm font-semibold text-accent">保存</button>
@@ -255,9 +261,9 @@
     </div>
 
     <!-- 弹窗 2：分组管理弹窗 (增删改) -->
-    <div id="group-modal" class="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-30 hidden flex items-end justify-center">
-      <div class="bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-4 max-h-[80vh] overflow-y-auto">
-        <div class="flex items-center justify-between pb-2 border-b border-border">
+    <div id="group-modal" class="app-modal keyboard-aware-modal fixed inset-0 bg-black/40 backdrop-blur-[2px] z-30 hidden flex items-end justify-center">
+      <div class="app-modal-panel bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+        <div class="app-modal-header flex items-center justify-between pb-2 border-b border-border">
           <span class="text-xs text-muted">直接点击名称即可修改</span>
           <h3 class="font-serif font-semibold text-base">管理自定义分组</h3>
           <button onclick="closeGroupModal()" class="text-sm font-semibold text-accent">完成</button>
@@ -274,8 +280,8 @@
     </div>
 
     <!-- 弹窗 3：通用确认 / 校验报告弹窗 -->
-    <div id="dialog-modal" class="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-40 hidden flex items-center justify-center px-6">
-      <div class="bg-card w-full max-w-[360px] rounded-2xl border border-border p-5 space-y-4 shadow-xl">
+    <div id="dialog-modal" class="app-modal fixed inset-0 bg-black/40 backdrop-blur-[2px] z-40 hidden flex items-center justify-center px-6">
+      <div class="app-modal-panel bg-card w-full max-w-[360px] rounded-2xl border border-border p-5 space-y-4 shadow-xl overflow-y-auto">
         <h4 id="dialog-title" class="font-serif font-semibold text-base text-text">提示</h4>
         <p id="dialog-msg" class="text-xs text-muted leading-relaxed whitespace-pre-line"></p>
         <div id="dialog-actions" class="flex justify-end gap-2 pt-1">
@@ -284,9 +290,9 @@
     </div>
 
     <!-- 弹窗 4：手机端导出预览与系统分享弹窗 -->
-    <div id="export-modal" class="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-40 hidden flex items-end justify-center">
-      <div class="bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-3 max-h-[85vh] flex flex-col">
-        <div class="flex items-center justify-between pb-2 border-b border-border">
+    <div id="export-modal" class="app-modal fixed inset-0 bg-black/40 backdrop-blur-[2px] z-40 hidden flex items-end justify-center">
+      <div class="app-modal-panel bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-3 max-h-[85vh] flex flex-col overflow-y-auto">
+        <div class="app-modal-header flex items-center justify-between pb-2 border-b border-border">
           <button onclick="closeExportModal()" class="text-sm text-muted">关闭</button>
           <h3 id="export-modal-title" class="font-serif font-semibold text-base">导出数据</h3>
           <button onclick="copyExportContent()" class="text-sm font-semibold text-accent">一键复制</button>

@@ -139,8 +139,13 @@ test('actual JSON/Markdown formatters open preview only and leave stored records
   format('json');
   format('md');
   assert.equal(JSON.stringify({ sites, groups }), before);
-  assert.deepEqual(JSON.parse(files[0].content).sites, sites);
-  assert.deepEqual(JSON.parse(files[0].content).groups, groups);
+  const backup = JSON.parse(files[0].content);
+  const project = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.deepEqual(Object.keys(backup), ['version', 'exportedAt', 'groups', 'sites']);
+  assert.equal(backup.version, project.version);
+  assert.ok(Number.isFinite(Date.parse(backup.exportedAt)));
+  assert.deepEqual(backup.sites, sites);
+  assert.deepEqual(backup.groups, groups);
   assert.match(files[0].filename, /\.json$/);
   assert.equal(files[0].mime, 'application/json;charset=utf-8');
   assert.match(files[1].content, /测试😀/);

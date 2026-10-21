@@ -11,6 +11,9 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(DocumentSaverPlugin.class);
         super.onCreate(savedInstanceState);
+        if (getBridge() != null) {
+            WebViewInsets.install(this, getBridge().getWebView());
+        }
         traceTask("create");
     }
 

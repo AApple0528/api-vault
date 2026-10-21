@@ -5,9 +5,9 @@ const config: CapacitorConfig = {
   appName: 'API Vault',
   webDir: 'dist',
   bundledWebRuntime: false,
-  // Apply system-bar/cutout margins once, on Android versions enforcing E2E.
-  // Consumed native insets must not be added again as CSS safe-area padding.
-  android: { adjustMarginsForEdgeToEdge: 'auto' },
+  // MainActivity owns system-bar/cutout/IME insets on Android 15+.
+  // Android <=14 keeps platform adjustResize. Do not enable a second owner.
+  android: { adjustMarginsForEdgeToEdge: 'disable' },
   plugins: {
     CapacitorHttp: { enabled: false }
   }

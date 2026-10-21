@@ -29,6 +29,15 @@ local.properties
 *.p12
 *.pfx
 
+# Local user backups and diagnostic captures; keep source/test fixtures visible
+/backups/
+/logs/
+/backup.json
+/data-backup.json
+/api-vault-backup-*.json
+/debug.log
+/pnpm-debug.log*
+
 # OS-generated files
 .DS_Store
 Thumbs.db
