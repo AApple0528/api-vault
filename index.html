@@ -51,8 +51,11 @@
           class="w-full bg-card border border-border rounded-xl pl-9 pr-4 py-2.5 text-sm placeholder:text-muted/70 focus:outline-none focus:border-accent transition">
       </div>
 
-      <!-- 分组横向筛选 + 左侧齿轮管理按钮 -->
+      <!-- 分组横向筛选 + 分组选择 / 管理按钮 -->
       <div class="flex items-center gap-1.5">
+        <button onclick="openGroupPicker()" title="选择分组" aria-label="选择分组" class="shrink-0 w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center text-muted hover:text-text hover:border-accent transition">
+          <i data-lucide="list-filter" class="w-4 h-4"></i>
+        </button>
         <button onclick="openGroupModal()" title="管理分组" class="shrink-0 w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center text-muted hover:text-text hover:border-accent transition">
           <i data-lucide="settings" class="w-4 h-4"></i>
         </button>
@@ -263,9 +266,9 @@
     <!-- 弹窗 2：分组管理弹窗 (增删改) -->
     <div id="group-modal" class="app-modal keyboard-aware-modal fixed inset-0 bg-black/40 backdrop-blur-[2px] z-30 hidden flex items-end justify-center">
       <div class="app-modal-panel bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-4 max-h-[80vh] overflow-y-auto">
-        <div class="app-modal-header flex items-center justify-between pb-2 border-b border-border">
-          <span class="text-xs text-muted">直接点击名称即可修改</span>
-          <h3 class="font-serif font-semibold text-base">管理自定义分组</h3>
+        <div class="app-modal-header relative flex items-center justify-between pb-2 border-b border-border min-h-8">
+          <span class="text-xs text-muted">点击即可修改</span>
+          <h3 class="absolute left-1/2 -translate-x-1/2 font-serif font-semibold text-base whitespace-nowrap">管理自定义分组</h3>
           <button onclick="closeGroupModal()" class="text-sm font-semibold text-accent">完成</button>
         </div>
 
@@ -279,7 +282,19 @@
       </div>
     </div>
 
-    <!-- 弹窗 3：通用确认 / 校验报告弹窗 -->
+    <!-- 弹窗 3：分组快速选择 -->
+    <div id="group-picker-modal" class="app-modal fixed inset-0 bg-black/40 backdrop-blur-[2px] z-30 hidden flex items-end justify-center">
+      <div class="app-modal-panel bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+        <div class="app-modal-header flex items-center justify-between pb-2 border-b border-border">
+          <span class="w-10" aria-hidden="true"></span>
+          <h3 class="font-serif font-semibold text-base">选择分组</h3>
+          <button onclick="closeGroupPicker()" class="text-sm font-semibold text-accent">关闭</button>
+        </div>
+        <div id="group-picker-list" class="space-y-2"></div>
+      </div>
+    </div>
+
+    <!-- 弹窗 4：通用确认 / 校验报告弹窗 -->
     <div id="dialog-modal" class="app-modal fixed inset-0 bg-black/40 backdrop-blur-[2px] z-40 hidden flex items-center justify-center px-6">
       <div class="app-modal-panel bg-card w-full max-w-[360px] rounded-2xl border border-border p-5 space-y-4 shadow-xl overflow-y-auto">
         <h4 id="dialog-title" class="font-serif font-semibold text-base text-text">提示</h4>
@@ -289,7 +304,7 @@
       </div>
     </div>
 
-    <!-- 弹窗 4：手机端导出预览与系统分享弹窗 -->
+    <!-- 弹窗 5：手机端导出预览与系统分享弹窗 -->
     <div id="export-modal" class="app-modal fixed inset-0 bg-black/40 backdrop-blur-[2px] z-40 hidden flex items-end justify-center">
       <div class="app-modal-panel bg-card w-full max-w-[430px] rounded-t-3xl border-t border-border p-5 space-y-3 max-h-[85vh] flex flex-col overflow-y-auto">
         <div class="app-modal-header flex items-center justify-between pb-2 border-b border-border">

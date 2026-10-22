@@ -1,9 +1,11 @@
-import { createIcons, ArrowUpRight, Bookmark, CheckCircle2, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, Plus, Search, Settings, ShieldCheck, Trash2, User } from 'lucide';
+import { createIcons, ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Plus, Search, Settings, ShieldCheck, Trash2, User } from 'lucide';
 import { Browser } from '@capacitor/browser';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { createExportActions, downloadInBrowser, shareInBrowser } from './export-actions.js';
+import { bindLongPressSortable, persistJsonArrays, reorderByIndex, serializeFormNotes } from './sortable.js';
+import { siteMatchesFilters } from './site-filters.js';
 
 const DocumentSaver = registerPlugin('DocumentSaver');
 const isAndroid = Capacitor.getPlatform() === 'android';
@@ -86,15 +88,18 @@ document.getElementById('export-share-btn').onclick = exportActions.share;
 document.getElementById('export-download-btn').onclick = exportActions.save;
 if (isAndroid) document.getElementById('export-download-btn').textContent = '保存到文件（不分享）';
 
-const iconSet = { ArrowUpRight, Bookmark, CheckCircle2, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, Plus, Search, Settings, ShieldCheck, Trash2, User };
+const iconSet = { ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Plus, Search, Settings, ShieldCheck, Trash2, User };
 
 const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     const STORAGE_KEY_GROUPS = 'api_vault_groups_v3';
 
     let defaultMask = true;
-    let currentCategory = '全部';
+    let currentStatusFilter = '全部';
+    let currentGroupFilter = null;
     let editingSiteId = null;
     let tempFormNotes = [];
+    let releaseGroupSort = () => {};
+    let releaseNoteSort = () => {};
 
     function readStoredJson(key, fallback) {
       try {
@@ -193,8 +198,10 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function saveToStorage() {
       try {
-        localStorage.setItem(STORAGE_KEY_SITES, JSON.stringify(sites));
-        localStorage.setItem(STORAGE_KEY_GROUPS, JSON.stringify(customGroups));
+        persistJsonArrays(localStorage, [
+          [STORAGE_KEY_SITES, sites],
+          [STORAGE_KEY_GROUPS, customGroups]
+        ]);
       } catch (error) {
         console.error('Unable to persist API Vault data', error);
         showToast('本地存储失败，请检查设备空间');
@@ -208,21 +215,33 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     function renderCategories() {
       const container = document.getElementById('category-tabs');
       const tabs = getAllFilterTabs();
-      if (!tabs.includes(currentCategory)) currentCategory = '全部';
+      if (currentGroupFilter && !customGroups.includes(currentGroupFilter)) currentGroupFilter = null;
 
       container.innerHTML = tabs.map(cat => {
-        const active = cat === currentCategory;
+        const active = cat === '全部'
+          ? currentStatusFilter === '全部' && !currentGroupFilter
+          : ['待签到', '已签到'].includes(cat)
+            ? cat === currentStatusFilter
+            : cat === currentGroupFilter;
         return `<button onclick="setCategoryByIndex(${tabs.indexOf(cat)})" class="px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition ${ active ? 'bg-text text-card shadow-sm' : 'bg-card border border-border text-muted hover:text-text' }">${escapeHtml(cat)}</button>`;
       }).join('');
 
-      document.getElementById('card-stat-all').classList.toggle('border-accent', currentCategory === '全部');
-      document.getElementById('card-stat-pending').classList.toggle('border-accent', currentCategory === '待签到');
-      document.getElementById('card-stat-done').classList.toggle('border-sage', currentCategory === '已签到');
+      document.getElementById('card-stat-all').classList.toggle('border-accent', currentStatusFilter === '全部' && !currentGroupFilter);
+      document.getElementById('card-stat-pending').classList.toggle('border-accent', currentStatusFilter === '待签到');
+      document.getElementById('card-stat-done').classList.toggle('border-sage', currentStatusFilter === '已签到');
     }
 
     function setCategory(cat) {
-      currentCategory = cat;
+      if (cat === '全部') {
+        currentStatusFilter = '全部';
+        currentGroupFilter = null;
+      } else if (cat === '待签到' || cat === '已签到') {
+        currentStatusFilter = cat;
+      } else if (customGroups.includes(cat)) {
+        currentGroupFilter = cat;
+      }
       renderCategories();
+      renderGroupPickerList();
       renderSites();
     }
 
@@ -278,18 +297,15 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       const q = document.getElementById('search-input').value.trim().toLowerCase();
       const list = document.getElementById('site-list');
 
-      const filtered = sites.filter(s => {
-        const matchCat =
-          currentCategory === '全部' ? true :
-          currentCategory === '待签到' ? (s.needCheckIn && !s.checkedInToday) :
-          currentCategory === '已签到' ? (s.needCheckIn && s.checkedInToday) :
-          s.group === currentCategory;
-        const matchQ = !q || s.name.toLowerCase().includes(q) || s.url.toLowerCase().includes(q) || (s.tags || []).some(t => String(t).toLowerCase().includes(q));
-        return matchCat && matchQ;
-      });
+      const filtered = sites.filter(site => siteMatchesFilters(site, {
+        status: currentStatusFilter,
+        group: currentGroupFilter,
+        query: q
+      }));
 
       if (filtered.length === 0) {
-        list.innerHTML = `<div class="text-center py-12 text-xs text-muted">当前「${escapeHtml(currentCategory)}」下没有匹配的站点书签</div>`;
+        const filterLabel = [currentGroupFilter, currentStatusFilter !== '全部' ? currentStatusFilter : null].filter(Boolean).join(' · ') || '全部';
+        list.innerHTML = `<div class="text-center py-12 text-xs text-muted">当前「${escapeHtml(filterLabel)}」下没有匹配的站点书签</div>`;
         return;
       }
 
@@ -453,20 +469,30 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function renderFormNotes() {
       const container = document.getElementById('form-notes-container');
+      releaseNoteSort();
       container.innerHTML = tempFormNotes.map((note, idx) => `
-        <div class="flex items-center gap-2">
-          <input type="text" value="${escapeHtml(note.label)}" oninput="updateFormNote(${idx}, 'label', this.value)" placeholder="标签" class="w-24 bg-bg border border-border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-accent">
-          <input type="text" value="${escapeHtml(note.value)}" oninput="updateFormNote(${idx}, 'value', this.value)" placeholder="填写内容 (如 sk-xxx 或账号)..." class="flex-1 bg-bg border border-border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-accent">
+        <div data-sort-index="${idx}" class="sortable-item flex items-center gap-1.5 min-w-0">
+          <button type="button" data-sort-handle class="sort-handle p-1 text-muted hover:text-accent shrink-0" title="长按拖动便签" aria-label="长按拖动便签">
+            <i data-lucide="grip-vertical" class="w-4 h-4 pointer-events-none"></i>
+          </button>
+          <input type="text" value="${escapeHtml(note.label)}" oninput="updateFormNote(${idx}, 'label', this.value)" placeholder="标签" class="w-20 sm:w-24 shrink-0 bg-bg border border-border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-accent">
+          <input type="text" value="${escapeHtml(note.value)}" oninput="updateFormNote(${idx}, 'value', this.value)" placeholder="填写内容 (如 sk-xxx 或账号)..." class="flex-1 min-w-0 bg-bg border border-border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-accent">
           <button type="button" onclick="removeFormNoteRow(${idx})" class="p-1.5 text-muted hover:text-red-600 shrink-0" title="删除此行">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
         </div>
       `).join('');
       createIcons({ icons: iconSet });
+      releaseNoteSort = bindLongPressSortable(container, {
+        onReorder(order) {
+          tempFormNotes = reorderByIndex(tempFormNotes, order);
+          renderFormNotes();
+        }
+      });
     }
 
     function addFormNoteRow() {
-      tempFormNotes.push({ label: `便签 ${tempFormNotes.length + 1}`, value: '' });
+      tempFormNotes.push({ label: `便签 ${tempFormNotes.length + 1}`, value: '', masked: defaultMask });
       renderFormNotes();
     }
 
@@ -478,7 +504,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function removeFormNoteRow(idx) {
       if (tempFormNotes.length <= 1) {
-        tempFormNotes[0] = { label: '便签 1', value: '' };
+        tempFormNotes[0] = { label: '便签 1', value: '', masked: defaultMask };
       } else {
         tempFormNotes.splice(idx, 1);
       }
@@ -500,8 +526,8 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         document.getElementById('form-checkin').checked = !!s.needCheckIn;
         document.getElementById('form-desc').value = s.desc || '';
         tempFormNotes = (s.notes && s.notes.length > 0)
-          ? s.notes.map(n => ({ label: n.label, value: n.value }))
-          : [{ label: '便签 1', value: '' }, { label: '便签 2', value: '' }];
+          ? s.notes.map(n => ({ label: n.label, value: n.value, masked: Boolean(n.masked) }))
+          : [{ label: '便签 1', value: '', masked: defaultMask }, { label: '便签 2', value: '', masked: defaultMask }];
       } else {
         titleEl.innerText = '新增站点';
         document.getElementById('form-name').value = '';
@@ -511,8 +537,8 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         document.getElementById('form-checkin').checked = true;
         document.getElementById('form-desc').value = '';
         tempFormNotes = [
-          { label: '便签 1', value: '' },
-          { label: '便签 2', value: '' }
+          { label: '便签 1', value: '', masked: defaultMask },
+          { label: '便签 2', value: '', masked: defaultMask }
         ];
       }
 
@@ -535,13 +561,9 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       const needCheckIn = document.getElementById('form-checkin').checked;
       const desc = document.getElementById('form-desc').value.trim();
 
-      const validNotes = tempFormNotes
-        .filter(n => n.label.trim() || n.value.trim())
-        .map((n, i) => ({
-          label: n.label.trim() || `便签 ${i + 1}`,
-          value: n.value.trim() || '暂无内容',
-          masked: defaultMask
-        }));
+      // Existing and new sites both save the temporary form order; editing does
+      // not mutate persisted notes until the user confirms the whole form.
+      const validNotes = serializeFormNotes(tempFormNotes);
 
       if (editingSiteId) {
         const idx = sites.findIndex(item => item.id === editingSiteId);
@@ -585,8 +607,12 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function renderGroupManageList() {
       const list = document.getElementById('group-manage-list');
+      releaseGroupSort();
       list.innerHTML = customGroups.map((g, idx) => `
-        <div class="flex items-center justify-between bg-bg border border-border rounded-xl px-3 py-2">
+        <div data-sort-index="${idx}" class="sortable-item flex items-center justify-between bg-bg border border-border rounded-xl pl-1.5 pr-3 py-2">
+          <button type="button" data-sort-handle class="sort-handle p-1.5 text-muted hover:text-accent shrink-0" title="长按拖动分组" aria-label="长按拖动分组">
+            <i data-lucide="grip-vertical" class="w-4 h-4 pointer-events-none"></i>
+          </button>
           <input type="text" value="${escapeHtml(g)}" onchange="renameCustomGroup(${idx}, this.value)" class="bg-transparent text-sm font-medium focus:outline-none focus:text-accent flex-1 mr-2">
           <div class="flex items-center gap-2 shrink-0">
             <span class="text-[11px] text-muted">${sites.filter(s => s.group === g).length} 个站点</span>
@@ -596,6 +622,51 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
           </div>
         </div>
       `).join('');
+      createIcons({ icons: iconSet });
+      releaseGroupSort = bindLongPressSortable(list, {
+        onReorder(order) {
+          customGroups = reorderByIndex(customGroups, order);
+          saveToStorage();
+          renderGroupManageList();
+          renderCategories();
+          renderGroupPickerList();
+          showToast('分组顺序已保存');
+        }
+      });
+    }
+
+    function openGroupPicker() {
+      renderGroupPickerList();
+      document.getElementById('group-picker-modal').classList.remove('hidden');
+    }
+
+    function closeGroupPicker() {
+      document.getElementById('group-picker-modal').classList.add('hidden');
+    }
+
+    function selectGroupFromPicker(index) {
+      const numericIndex = Number(index);
+      currentGroupFilter = numericIndex < 0 ? null : (customGroups[numericIndex] || null);
+      closeGroupPicker();
+      renderCategories();
+      renderSites();
+    }
+
+    function renderGroupPickerList() {
+      const list = document.getElementById('group-picker-list');
+      if (!list) return;
+      if (customGroups.length === 0) {
+        list.innerHTML = '<div class="py-8 text-center text-xs text-muted">暂无自定义分组，请先在分组管理中添加</div>';
+        return;
+      }
+      const rows = [{ name: '全部分组', index: -1 }, ...customGroups.map((name, index) => ({ name, index }))];
+      list.innerHTML = rows.map(row => {
+        const active = row.index < 0 ? !currentGroupFilter : row.name === currentGroupFilter;
+        return `<button type="button" onclick="selectGroupFromPicker(${row.index})" class="w-full flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition ${active ? 'border-accent bg-accentLight/60 text-accent' : 'border-border bg-bg text-text hover:border-accent/50'}">
+          <span class="text-sm font-medium truncate">${escapeHtml(row.name)}</span>
+          ${active ? '<i data-lucide="check" class="w-4 h-4 shrink-0"></i>' : ''}
+        </button>`;
+      }).join('');
       createIcons({ icons: iconSet });
     }
 
@@ -623,9 +694,11 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       }
       customGroups[idx] = val;
       sites.forEach(s => { if (s.group === oldName) s.group = val; });
-      if (currentCategory === oldName) currentCategory = val;
+      if (currentGroupFilter === oldName) currentGroupFilter = val;
       saveToStorage();
       renderGroupManageList();
+      renderCategories();
+      renderGroupPickerList();
       showToast(`已重命名为「${val}」`);
     }
 
@@ -637,9 +710,11 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       const fallback = customGroups.find((_, i) => i !== idx);
       customGroups.splice(idx, 1);
       sites.forEach(s => { if (s.group === target) s.group = fallback; });
-      if (currentCategory === target) currentCategory = '全部';
+      if (currentGroupFilter === target) currentGroupFilter = null;
       saveToStorage();
       renderGroupManageList();
+      renderCategories();
+      renderGroupPickerList();
       showToast(`已删除「${target}」，原站点已移至「${fallback}」`);
     }
 
@@ -860,11 +935,11 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     createIcons({ icons: iconSet });
 
     Object.assign(globalThis, {
-      addCustomGroup, addFormNoteRow, closeDialog, closeExportModal, closeGroupModal,
+      addCustomGroup, addFormNoteRow, closeDialog, closeExportModal, closeGroupModal, closeGroupPicker,
       closeSiteModal, confirmClearAllData, confirmDeleteSite, copyExportContent,
       copyProjectRepository, copySiteNote, copyText, deleteCustomGroup, exportData, handleBookmarkImport,
-      handleJsonImport, openGroupModal, openSiteLink, openSiteModal, removeFormNoteRow,
+      handleJsonImport, openGroupModal, openGroupPicker, openSiteLink, openSiteModal, removeFormNoteRow,
       openProjectRepository, renderSites, renameCustomGroup, saveSite, setCategory, setCategoryByIndex,
-      switchTab, toggleDefaultMask, toggleCheckIn, toggleNoteMask, updateFormNote, triggerBookmarkInput,
+      selectGroupFromPicker, switchTab, toggleDefaultMask, toggleCheckIn, toggleNoteMask, updateFormNote, triggerBookmarkInput,
       triggerJsonInput
     });
