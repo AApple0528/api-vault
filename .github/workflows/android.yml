@@ -30,6 +30,8 @@ jobs:
           java-version: '21'
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Run tests
