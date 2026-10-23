@@ -5,7 +5,7 @@ API Vault 是一个纯本地的站点书签与随手记工具，保留原有单�
 ## 项目现状
 
 - 源码仓库：[https://github.com/AApple0528/api-vault](https://github.com/AApple0528/api-vault)。
-- 当前源码版本为 `0.3.1`，Android 为 `versionName 0.3.1` / `versionCode 2`；已有 `v0.3.0` Release 保留，`v0.3.1` 正在发布准备中。
+- 当前源码版本为 `0.3.2`
 - 保留站点管理、分组、标签、搜索筛选、签到、便签、复制、JSON 导入导出和 Markdown 导出；核心界面的 Tailwind 和 Lucide 使用本地依赖，可离线使用。
 - 原始 `API-Vault.html` 保留不改；现有应用为原生 HTML/CSS/JavaScript，没有迁移 Vue，也没有引入 iOS 工程。
 
