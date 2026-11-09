@@ -1,11 +1,17 @@
-import { createIcons, ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Plus, Search, Settings, ShieldCheck, Trash2, User } from 'lucide';
+import { createIcons, ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Plus, Search, Settings, ShieldCheck, Trash2, User } from 'lucide';
 import { Browser } from '@capacitor/browser';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { createExportActions, downloadInBrowser, shareInBrowser } from './export-actions.js';
-import { bindLongPressSortable, persistJsonArrays, reorderByIndex, serializeFormNotes } from './sortable.js';
+import { bindLongPressSortable, reorderByIndex, serializeFormNotes } from './sortable.js';
 import { siteMatchesFilters } from './site-filters.js';
+import { createCredentialDisclosureState } from './credential-disclosure.js';
+import { ensureUniqueSiteIds, migrateStoredSiteIds, toValidSiteId } from './site-ids.js';
+import { getJsonImportFailureDialog, persistJsonArraysWithRollback, prepareAndPersistJsonImport } from './site-import.js';
+import { clearAllSitesSafely, createUniqueSiteIdForState, mergeSitesForPersistence, partitionSitesForDisplay, persistBeforeCommit } from './site-storage.js';
+import { normalizeCustomGroups, resolveSiteGroup, STATUS_FILTER_NAMES } from './site-groups.js';
+import { isSafeHttpUrl, normalizeHttpUrl, validateGroupName, validateManualSiteUrl } from './site-validation.js';
 
 const DocumentSaver = registerPlugin('DocumentSaver');
 const isAndroid = Capacitor.getPlatform() === 'android';
@@ -88,7 +94,7 @@ document.getElementById('export-share-btn').onclick = exportActions.share;
 document.getElementById('export-download-btn').onclick = exportActions.save;
 if (isAndroid) document.getElementById('export-download-btn').textContent = '保存到文件（不分享）';
 
-const iconSet = { ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Plus, Search, Settings, ShieldCheck, Trash2, User };
+const iconSet = { ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Plus, Search, Settings, ShieldCheck, Trash2, User };
 
 const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     const STORAGE_KEY_GROUPS = 'api_vault_groups_v3';
@@ -98,6 +104,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     let currentGroupFilter = null;
     let editingSiteId = null;
     let tempFormNotes = [];
+    const credentialDisclosure = createCredentialDisclosureState();
     let releaseGroupSort = () => {};
     let releaseNoteSort = () => {};
 
@@ -111,25 +118,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       }
     }
 
-    function isSafeHttpUrl(value) {
-      try {
-        const url = new URL(String(value).trim());
-        return url.protocol === 'http:' || url.protocol === 'https:';
-      } catch {
-        return false;
-      }
-    }
-
-    function normalizeHttpUrl(value) {
-      const candidate = String(value || '').trim();
-      const withProtocol = /^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`;
-      return isSafeHttpUrl(withProtocol) ? withProtocol : 'https://example.com';
-    }
-
-    let customGroups = readStoredJson(STORAGE_KEY_GROUPS, ['主力站', '白嫖备用', '公益站']);
-    if (!Array.isArray(customGroups) || customGroups.length === 0 || customGroups.some(group => typeof group !== 'string')) {
-      customGroups = ['主力站', '白嫖备用', '公益站'];
-    }
+    let customGroups = normalizeCustomGroups(readStoredJson(STORAGE_KEY_GROUPS, null));
 
     const defaultSampleSites = [
       {
@@ -175,16 +164,16 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       }
     ];
 
-    function normalizeSite(site, index) {
+    function normalizeSite(site, groups = customGroups) {
       if (!site || typeof site !== 'object' || !isSafeHttpUrl(site.url)) return null;
       const notes = Array.isArray(site.notes) ? site.notes.filter(note => note && typeof note === 'object').map(note => ({
         label: String(note.label || ''), value: String(note.value || ''), masked: Boolean(note.masked)
       })) : [];
       return {
-        id: Number.isSafeInteger(Number(site.id)) && Number(site.id) > 0 ? Number(site.id) : Date.now() + index,
+        id: toValidSiteId(site.id),
         name: String(site.name || '未命名站点'),
         url: normalizeHttpUrl(site.url),
-        group: customGroups.includes(String(site.group)) ? String(site.group) : (customGroups[0] || '默认分组'),
+        group: resolveSiteGroup(site.group, groups),
         tags: Array.isArray(site.tags) ? site.tags.map(String) : [],
         needCheckIn: Boolean(site.needCheckIn),
         checkedInToday: Boolean(site.checkedInToday),
@@ -194,22 +183,52 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     }
 
     const storedSites = readStoredJson(STORAGE_KEY_SITES, null);
-    let sites = Array.isArray(storedSites) ? storedSites.map(normalizeSite).filter(Boolean) : defaultSampleSites;
-
-    function saveToStorage() {
+    let storedSiteSource = storedSites;
+    if (Array.isArray(storedSites)) {
+      const migrationSeed = Date.now();
       try {
-        persistJsonArrays(localStorage, [
-          [STORAGE_KEY_SITES, sites],
-          [STORAGE_KEY_GROUPS, customGroups]
-        ]);
+        storedSiteSource = migrateStoredSiteIds(localStorage, STORAGE_KEY_SITES, storedSites, migrationSeed).sites;
       } catch (error) {
-        console.error('Unable to persist API Vault data', error);
-        showToast('本地存储失败，请检查设备空间');
+        storedSiteSource = ensureUniqueSiteIds(storedSites, migrationSeed).sites;
+        console.error('Unable to persist site ID migration', error);
+        showToast('站点 ID 已在本次运行中修复，但未能写入本地存储');
       }
+    }
+    const partitionedSites = Array.isArray(storedSiteSource)
+      ? partitionSitesForDisplay(storedSiteSource, site => normalizeSite(site, customGroups))
+      : { sites: defaultSampleSites, preservedSites: [] };
+    let preservedInvalidSites = partitionedSites.preservedSites;
+    let sites = ensureUniqueSiteIds(partitionedSites.sites).sites;
+
+    function persistAppState(nextSites, nextGroups, preservedSites = preservedInvalidSites) {
+      persistJsonArraysWithRollback(localStorage, [
+        [STORAGE_KEY_SITES, mergeSitesForPersistence(nextSites, preservedSites)],
+        [STORAGE_KEY_GROUPS, nextGroups]
+      ]);
+    }
+
+    function createNextSiteId() {
+      return createUniqueSiteIdForState(sites, preservedInvalidSites);
+    }
+
+    function saveToStorage(nextSites, nextGroups) {
+      return persistBeforeCommit({
+        persist: () => persistAppState(nextSites, nextGroups),
+        commit: () => {
+          sites = nextSites;
+          customGroups = nextGroups;
+        },
+        notifyFailure(error, storageMayBeInconsistent) {
+          showToast(storageMayBeInconsistent
+            ? '保存失败，存储状态可能不一致，请重新打开应用检查数据'
+            : '本地存储失败，修改未保存，请检查设备空间');
+        },
+        reportError: error => console.error('Unable to persist API Vault data', error)
+      }).ok;
     }
 
     function getAllFilterTabs() {
-      return ['全部', '待签到', '已签到', ...customGroups];
+      return ['全部', ...customGroups];
     }
 
     function renderCategories() {
@@ -220,9 +239,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       container.innerHTML = tabs.map(cat => {
         const active = cat === '全部'
           ? currentStatusFilter === '全部' && !currentGroupFilter
-          : ['待签到', '已签到'].includes(cat)
-            ? cat === currentStatusFilter
-            : cat === currentGroupFilter;
+          : cat === currentGroupFilter;
         return `<button onclick="setCategoryByIndex(${tabs.indexOf(cat)})" class="px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition ${ active ? 'bg-text text-card shadow-sm' : 'bg-card border border-border text-muted hover:text-text' }">${escapeHtml(cat)}</button>`;
       }).join('');
 
@@ -235,7 +252,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       if (cat === '全部') {
         currentStatusFilter = '全部';
         currentGroupFilter = null;
-      } else if (cat === '待签到' || cat === '已签到') {
+      } else if (STATUS_FILTER_NAMES.includes(cat)) {
         currentStatusFilter = cat;
       } else if (customGroups.includes(cat)) {
         currentGroupFilter = cat;
@@ -258,11 +275,13 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function openSiteLink(url) {
       const safeUrl = normalizeHttpUrl(url);
+      if (!safeUrl) return false;
       if (Capacitor.isNativePlatform()) {
         void Browser.open({ url: safeUrl });
       } else {
         window.open(safeUrl, '_blank', 'noopener,noreferrer');
       }
+      return true;
     }
 
     function openProjectRepository(event) {
@@ -309,14 +328,17 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         return;
       }
 
-      list.innerHTML = filtered.map(site => `
+      list.innerHTML = filtered.map(site => {
+        const credentialsExpanded = credentialDisclosure.isExpanded(site.id);
+        const safeUrl = normalizeHttpUrl(site.url);
+        return `
         <div class="bg-card border border-border rounded-2xl p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-3">
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
-              <a href="${escapeHtml(normalizeHttpUrl(site.url))}" target="_blank" rel="noopener noreferrer" class="font-serif font-semibold text-base text-text hover:text-accent transition inline-flex items-center gap-1 max-w-full">
-                <span class="truncate">${escapeHtml(site.name)}</span>
+              ${safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(site.name)}" class="font-serif font-semibold text-base text-text hover:text-accent transition inline-flex items-center gap-1 min-w-0 max-w-full">
+                <span class="truncate min-w-0">${escapeHtml(site.name)}</span>
                 <i data-lucide="arrow-up-right" class="w-4 h-4 text-muted shrink-0"></i>
-              </a>
+              </a>` : `<span class="font-serif font-semibold text-base text-text truncate min-w-0" title="${escapeHtml(site.name)}">${escapeHtml(site.name)}</span>`}
               <div class="text-[11px] text-muted font-mono mt-0.5 truncate">${escapeHtml(site.url.replace(/^https?:\/\//, ''))}</div>
             </div>
 
@@ -332,12 +354,23 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
             ` : ''}
           </div>
 
-          <div class="flex flex-wrap items-center gap-1.5">
-            <span class="text-[10px] font-medium px-2 py-0.5 rounded-md bg-bg border border-border text-text">${escapeHtml(site.group)}</span>${(site.tags || []).map(t => `<span class="text-[10px] text-muted px-2 py-0.5 rounded-md bg-bg">#${escapeHtml(t)}</span>`).join('')}
+          <div class="flex items-center justify-between gap-2 min-w-0">
+            <div class="flex flex-wrap items-center gap-1.5 min-w-0">
+              <span class="text-[10px] font-medium px-2 py-0.5 rounded-md bg-bg border border-border text-text">${escapeHtml(site.group)}</span>${(site.tags || []).map(t => `<span class="text-[10px] text-muted px-2 py-0.5 rounded-md bg-bg">#${escapeHtml(t)}</span>`).join('')}
+            </div>
+            ${site.notes && site.notes.length > 0 ? `
+              <button type="button" onclick="toggleSiteCredentials(${site.id})"
+                class="credential-toggle w-9 h-9 -mr-1 shrink-0 flex items-center justify-center text-muted hover:text-text transition"
+                aria-expanded="${credentialsExpanded}" aria-controls="site-credentials-${site.id}"
+                title="${credentialsExpanded ? '收起凭据信息' : '展开凭据信息'}" aria-label="${credentialsExpanded ? '收起凭据信息' : '展开凭据信息'}">
+                <i data-lucide="chevron-down" class="w-5 h-5 transition-transform duration-200 ${credentialsExpanded ? 'rotate-180' : ''}"></i>
+              </button>
+            ` : ''}
           </div>
 
           ${site.notes && site.notes.length > 0 ? `
-            <div class="bg-bg/70 rounded-xl p-2.5 space-y-2 border border-border/70">
+            <div id="site-credentials-${site.id}" class="credential-panel ${credentialsExpanded ? 'is-expanded' : ''}" ${credentialsExpanded ? '' : 'hidden'}>
+              <div class="bg-bg/70 rounded-xl p-2.5 space-y-2 border border-border/70">
               ${site.notes.map((n, idx) => `
                 <div class="flex items-center justify-between text-xs gap-2">
                   <span class="text-muted shrink-0 max-w-[90px] truncate">${escapeHtml(n.label)}</span>
@@ -352,6 +385,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
                   </div>
                 </div>
               `).join('')}
+              </div>
             </div>
           ` : ''}
 
@@ -363,39 +397,55 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
             </div>
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       createIcons({ icons: iconSet });
+    }
+
+    function toggleSiteCredentials(siteId) {
+      credentialDisclosure.toggle(Number(siteId));
+      renderSites();
     }
 
     function toggleCheckIn(id) {
       const s = sites.find(item => item.id === id);
       if (!s) return;
-      if (!s.checkedInToday) {
+      const checkedInToday = !s.checkedInToday;
+      const nextSites = sites.map(item => item.id === id ? { ...item, checkedInToday } : item);
+      if (!saveToStorage(nextSites, customGroups)) return;
+
+      if (checkedInToday) {
         openSiteLink(s.url);
-        s.checkedInToday = true;
         showToast('已打开站点并标记为「今日已签」');
       } else {
-        s.checkedInToday = false;
         showToast('已重置为「待签到」');
       }
-      saveToStorage();
       renderSites();
     }
 
     function toggleNoteMask(siteId, noteIdx) {
       const s = sites.find(item => item.id === siteId);
       if (s && s.notes[noteIdx]) {
-        s.notes[noteIdx].masked = !s.notes[noteIdx].masked;
-        saveToStorage();
+        const nextSites = sites.map(item => item.id === siteId ? {
+          ...item,
+          notes: item.notes.map((note, index) => index === noteIdx ? { ...note, masked: !note.masked } : note)
+        } : item);
+        if (!saveToStorage(nextSites, customGroups)) return;
         renderSites();
       }
     }
 
     function toggleDefaultMask(checked) {
+      const nextSites = sites.map(site => ({
+        ...site,
+        notes: (site.notes || []).map(note => ({ ...note, masked: checked }))
+      }));
+      if (!saveToStorage(nextSites, customGroups)) {
+        document.getElementById('toggle-mask').checked = defaultMask;
+        return;
+      }
       defaultMask = checked;
-      sites.forEach(s => (s.notes || []).forEach(n => n.masked = checked));
-      saveToStorage();
       renderSites();
       showToast(checked ? '已开启全部便签打码' : '已显示全部便签明文');
     }
@@ -435,8 +485,9 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         [
           { text: '取消', class: 'px-3.5 py-1.5 rounded-xl bg-bg text-muted text-xs', action: closeDialog },
           { text: '确认删除', class: 'px-3.5 py-1.5 rounded-xl bg-red-600 text-white text-xs font-medium', action: () => {
-            sites = sites.filter(item => item.id !== id);
-            saveToStorage();
+            const nextSites = sites.filter(item => item.id !== id);
+            if (!saveToStorage(nextSites, customGroups)) return;
+            credentialDisclosure.remove(id);
             renderSites();
             closeDialog();
             showToast('已删除该站点');
@@ -452,11 +503,18 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         [
           { text: '取消', class: 'px-3.5 py-1.5 rounded-xl bg-bg text-muted text-xs', action: closeDialog },
           { text: '确认清空', class: 'px-3.5 py-1.5 rounded-xl bg-red-600 text-white text-xs font-medium', action: () => {
-            sites = [];
-            saveToStorage();
-            renderSites();
-            closeDialog();
-            showToast('已清空全部站点数据');
+            clearAllSitesSafely({
+              persist: () => persistAppState([], customGroups, []),
+              commit: () => {
+                sites = [];
+                preservedInvalidSites = [];
+                credentialDisclosure.clear();
+                renderSites();
+                closeDialog();
+              },
+              notify: showToast,
+              reportError: error => console.error('Unable to clear API Vault data', error)
+            });
           }}
         ]
       );
@@ -513,6 +571,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function openSiteModal(siteId = null) {
       editingSiteId = siteId;
+      clearSiteUrlError();
       const titleEl = document.getElementById('site-modal-title');
 
       if (siteId) {
@@ -551,9 +610,27 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       editingSiteId = null;
     }
 
+    function clearSiteUrlError() {
+      const input = document.getElementById('form-url');
+      input.classList.remove('border-red-600', 'focus:border-red-600');
+      input.setAttribute('aria-invalid', 'false');
+      const error = document.getElementById('form-url-error');
+      error.textContent = '';
+      error.classList.add('hidden');
+    }
+
     function saveSite() {
       const name = document.getElementById('form-name').value.trim() || '未命名站点';
-      const url = normalizeHttpUrl(document.getElementById('form-url').value);
+      const urlInput = document.getElementById('form-url');
+      const urlError = document.getElementById('form-url-error');
+      const urlResult = validateManualSiteUrl(urlInput.value);
+      urlInput.classList.toggle('border-red-600', !urlResult.valid);
+      urlInput.classList.toggle('focus:border-red-600', !urlResult.valid);
+      urlInput.setAttribute('aria-invalid', String(!urlResult.valid));
+      urlError.textContent = urlResult.valid ? '' : (urlResult.reason === 'required' ? '请输入网址' : '网址格式不正确');
+      urlError.classList.toggle('hidden', urlResult.valid);
+      if (!urlResult.valid) return;
+      const url = urlResult.url;
 
       const group = document.getElementById('form-group').value || customGroups[0] || '默认分组';
       const tagsRaw = document.getElementById('form-tags').value.trim();
@@ -565,32 +642,34 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       // not mutate persisted notes until the user confirms the whole form.
       const validNotes = serializeFormNotes(tempFormNotes);
 
+      let nextSites;
+      let successMessage;
       if (editingSiteId) {
         const idx = sites.findIndex(item => item.id === editingSiteId);
-        if (idx !== -1) {
-          sites[idx] = {
-            ...sites[idx],
+        if (idx === -1) return showToast('未找到需要修改的站点');
+        nextSites = sites.map((site, index) => index === idx ? {
+            ...site,
             name, url, group, tags, needCheckIn,
             notes: validNotes,
             desc
-          };
-        }
-        showToast('站点修改已保存');
+          } : site);
+        successMessage = '站点修改已保存';
       } else {
-        sites.unshift({
-          id: Date.now(),
+        nextSites = [{
+          id: createNextSiteId(),
           name, url, group, tags, needCheckIn,
           checkedInToday: false,
           notes: validNotes,
           desc
-        });
-        showToast('新站点已添加');
+        }, ...sites];
+        successMessage = '新站点已添加';
       }
 
-      saveToStorage();
+      if (!saveToStorage(nextSites, customGroups)) return;
       closeSiteModal();
       renderCategories();
       renderSites();
+      showToast(successMessage);
     }
 
     function openGroupModal() {
@@ -625,8 +704,11 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       createIcons({ icons: iconSet });
       releaseGroupSort = bindLongPressSortable(list, {
         onReorder(order) {
-          customGroups = reorderByIndex(customGroups, order);
-          saveToStorage();
+          const nextGroups = reorderByIndex(customGroups, order);
+          if (!saveToStorage(sites, nextGroups)) {
+            renderGroupManageList();
+            return;
+          }
           renderGroupManageList();
           renderCategories();
           renderGroupPickerList();
@@ -672,30 +754,40 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function addCustomGroup() {
       const input = document.getElementById('new-group-input');
-      const val = input.value.trim();
+      const validation = validateGroupName(input.value);
+      const val = validation.name;
       if (!val) return showToast('请输入分组名称');
-      if (['全部', '待签到', '已签到', ...customGroups].includes(val)) {
+      if (!validation.valid) return showToast('分组名称过长，中文和 emoji 按 2 个字符计算，最多 16 个字符宽度');
+      if (['全部', ...STATUS_FILTER_NAMES, ...customGroups].includes(val)) {
         return showToast('该分组名称已存在');
       }
-      customGroups.push(val);
+      const nextGroups = [...customGroups, val];
+      if (!saveToStorage(sites, nextGroups)) return;
       input.value = '';
-      saveToStorage();
       renderGroupManageList();
       showToast('已添加分组');
     }
 
     function renameCustomGroup(idx, newName) {
-      const val = newName.trim();
+      const validation = validateGroupName(newName);
+      const val = validation.name;
       const oldName = customGroups[idx];
       if (!val || val === oldName) return renderGroupManageList();
-      if (['全部', '待签到', '已签到', ...customGroups].includes(val)) {
+      if (!validation.valid) {
+        showToast('分组名称过长，中文和 emoji 按 2 个字符计算，最多 16 个字符宽度');
+        return;
+      }
+      if (['全部', ...STATUS_FILTER_NAMES, ...customGroups].includes(val)) {
         showToast('分组名称冲突');
         return renderGroupManageList();
       }
-      customGroups[idx] = val;
-      sites.forEach(s => { if (s.group === oldName) s.group = val; });
+      const nextGroups = customGroups.map((group, index) => index === idx ? val : group);
+      const nextSites = sites.map(site => site.group === oldName ? { ...site, group: val } : site);
+      if (!saveToStorage(nextSites, nextGroups)) {
+        renderGroupManageList();
+        return;
+      }
       if (currentGroupFilter === oldName) currentGroupFilter = val;
-      saveToStorage();
       renderGroupManageList();
       renderCategories();
       renderGroupPickerList();
@@ -708,10 +800,10 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       }
       const target = customGroups[idx];
       const fallback = customGroups.find((_, i) => i !== idx);
-      customGroups.splice(idx, 1);
-      sites.forEach(s => { if (s.group === target) s.group = fallback; });
+      const nextGroups = customGroups.filter((_, index) => index !== idx);
+      const nextSites = sites.map(site => site.group === target ? { ...site, group: fallback } : site);
+      if (!saveToStorage(nextSites, nextGroups)) return;
       if (currentGroupFilter === target) currentGroupFilter = null;
-      saveToStorage();
       renderGroupManageList();
       renderCategories();
       renderGroupPickerList();
@@ -751,6 +843,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         let importedCount = 0;
         let skippedCount = 0;
         const defaultGroup = customGroups[0] || '主力站';
+        let nextSites = [...sites];
 
         links.forEach((a, idx) => {
           const href = (a.getAttribute('href') || '').trim();
@@ -767,8 +860,8 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
             folderTag = parentDl.previousElementSibling.textContent.trim() || '书签导入';
           }
 
-          sites.unshift({
-            id: Date.now() + idx,
+          nextSites.unshift({
+            id: createUniqueSiteIdForState(nextSites, preservedInvalidSites),
             name: title,
            url: normalizeHttpUrl(href),
             group: defaultGroup,
@@ -783,7 +876,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
           importedCount++;
         });
 
-        saveToStorage();
+        if (!saveToStorage(nextSites, customGroups)) return;
         renderCategories();
         renderSites();
 
@@ -819,16 +912,17 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
           if (!Array.isArray(data.sites)) {
             throw new Error('缺少 sites 数组');
           }
-          const importedGroups = Array.isArray(data.groups)
-            ? data.groups.filter(group => typeof group === 'string' && group.trim()).map(group => group.trim())
-            : [];
-          if (importedGroups.length > 0) customGroups = [...new Set(importedGroups)];
-          const importedSites = data.sites.map(normalizeSite).filter(Boolean);
-          if (importedSites.length !== data.sites.length) {
-            throw new Error('备份包含无效站点或网址');
-          }
-          sites = importedSites;
-          saveToStorage();
+          const importedState = prepareAndPersistJsonImport(data, {
+            currentGroups: customGroups,
+            normalizeSite,
+            persist({ sites: importedSites, groups: importedGroups }) {
+              persistAppState(importedSites, importedGroups, []);
+            }
+          });
+          customGroups = importedState.groups;
+          credentialDisclosure.clear();
+          sites = importedState.sites;
+          preservedInvalidSites = [];
           renderCategories();
           renderSites();
           showDialog(
@@ -842,7 +936,11 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
             ]
           );
         } catch (err) {
-          showDialog('JSON 校验失败', '所选文件不是有效的 API Vault 备份格式，请检查文件是否正确。', [
+          if (err?.code === 'IMPORT_STORAGE_FAILED' || err?.code === 'IMPORT_STORAGE_INCONSISTENT') {
+            console.error('Unable to restore JSON backup', err);
+          }
+          const failureDialog = getJsonImportFailureDialog(err);
+          showDialog(failureDialog.title, failureDialog.message, [
             { text: '关闭', class: 'px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-medium', action: closeDialog }
           ]);
         }
@@ -940,6 +1038,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       copyProjectRepository, copySiteNote, copyText, deleteCustomGroup, exportData, handleBookmarkImport,
       handleJsonImport, openGroupModal, openGroupPicker, openSiteLink, openSiteModal, removeFormNoteRow,
       openProjectRepository, renderSites, renameCustomGroup, saveSite, setCategory, setCategoryByIndex,
-      selectGroupFromPicker, switchTab, toggleDefaultMask, toggleCheckIn, toggleNoteMask, updateFormNote, triggerBookmarkInput,
+      selectGroupFromPicker, switchTab, toggleDefaultMask, toggleCheckIn, toggleNoteMask, toggleSiteCredentials, updateFormNote, triggerBookmarkInput,
+      clearSiteUrlError,
       triggerJsonInput
     });

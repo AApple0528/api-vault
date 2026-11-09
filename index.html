@@ -221,7 +221,8 @@
           </div>
           <div>
             <label class="text-xs text-muted block mb-1">跳转网址 (URL)</label>
-            <input id="form-url" type="text" placeholder="https://cloud.siliconflow.cn" class="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent">
+            <input id="form-url" type="text" aria-describedby="form-url-error" aria-invalid="false" oninput="clearSiteUrlError()" placeholder="https://cloud.siliconflow.cn" class="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent">
+            <div id="form-url-error" class="hidden mt-1 text-xs text-red-600" role="alert"></div>
           </div>
           <div class="grid grid-cols-2 gap-2.5">
             <div>
