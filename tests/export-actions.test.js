@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { serializeSitesWithCheckInDate } from '../src/check-in-state.js';
 import vm from 'node:vm';
 import { createExportActions, downloadInBrowser, shareInBrowser } from '../src/export-actions.js';
 
@@ -129,12 +130,12 @@ test('unsupported browser file sharing rejects without copying or downloading', 
 const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 test('actual JSON/Markdown formatters open preview only and leave stored records unchanged', () => {
   const sites = [{ name: '测试😀', url: 'https://example.test', group: '测试', tags: ['示例'],
-    needCheckIn: true, checkedInToday: false, desc: '备注', notes: [{ label: '测试便签', value: '纯测试内容' }] }];
+    needCheckIn: true, lastCheckInDate: null, checkedInToday: false, desc: '备注', notes: [{ label: '测试便签', value: '纯测试内容' }] }];
   const groups = ['测试'];
   const before = JSON.stringify({ sites, groups });
   const files = [];
   const format = vm.runInNewContext(source.slice(source.indexOf('function exportData('), source.indexOf('function closeExportModal(')) + '\nexportData;', {
-    sites, customGroups: groups, exportActions: { open: file => files.push(file) }
+    sites, customGroups: groups, serializeSitesWithCheckInDate, exportActions: { open: file => files.push(file) }
   });
   format('json');
   format('md');
@@ -144,7 +145,8 @@ test('actual JSON/Markdown formatters open preview only and leave stored records
   assert.deepEqual(Object.keys(backup), ['version', 'exportedAt', 'groups', 'sites']);
   assert.equal(backup.version, project.version);
   assert.ok(Number.isFinite(Date.parse(backup.exportedAt)));
-  assert.deepEqual(backup.sites, sites);
+  assert.deepEqual(backup.sites, serializeSitesWithCheckInDate(sites));
+  assert.equal(backup.sites[0].lastCheckInDate, null);
   assert.deepEqual(backup.groups, groups);
   assert.match(files[0].filename, /\.json$/);
   assert.equal(files[0].mime, 'application/json;charset=utf-8');

@@ -7,6 +7,7 @@ import { createExportActions, downloadInBrowser, shareInBrowser } from './export
 import { bindLongPressSortable, reorderByIndex, serializeFormNotes } from './sortable.js';
 import { siteMatchesFilters } from './site-filters.js';
 import { createCredentialDisclosureState } from './credential-disclosure.js';
+import { getLocalDateKey, isCheckedInToday, migrateCheckInDates, normalizeCheckInDate, refreshCheckInStatus, serializeSitesWithCheckInDate, setCheckInForToday } from './check-in-state.js';
 import { ensureUniqueSiteIds, migrateStoredSiteIds, toValidSiteId } from './site-ids.js';
 import { getJsonImportFailureDialog, persistJsonArraysWithRollback, prepareAndPersistJsonImport } from './site-import.js';
 import { clearAllSitesSafely, createUniqueSiteIdForState, mergeSitesForPersistence, partitionSitesForDisplay, persistBeforeCommit } from './site-storage.js';
@@ -128,7 +129,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         group: '主力站',
         tags: ['主力', 'DeepSeek满血'],
         needCheckIn: true,
-        checkedInToday: false,
+        lastCheckInDate: null,
         notes: [
           { label: '主用凭证', value: 'sk-sf-89f23a90c11b4e7d', masked: true },
           { label: '登录账号', value: 'pingping@studio.com', masked: false }
@@ -142,7 +143,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         group: '主力站',
         tags: ['模型全', '按量计费'],
         needCheckIn: false,
-        checkedInToday: false,
+        lastCheckInDate: null,
         notes: [
           { label: '默认串码', value: 'sk-or-v1-7782910a9x', masked: true }
         ],
@@ -155,7 +156,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         group: '公益站',
         tags: ['每日签到', '白嫖'],
         needCheckIn: true,
-        checkedInToday: true,
+        lastCheckInDate: getLocalDateKey(),
         notes: [
           { label: '福利码', value: 'sk-free-992011a', masked: true },
           { label: '密码备忘', value: 'Jiang180cm!', masked: true }
@@ -176,7 +177,8 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         group: resolveSiteGroup(site.group, groups),
         tags: Array.isArray(site.tags) ? site.tags.map(String) : [],
         needCheckIn: Boolean(site.needCheckIn),
-        checkedInToday: Boolean(site.checkedInToday),
+        lastCheckInDate: normalizeCheckInDate(site),
+        checkedInToday: isCheckedInToday(site),
         notes,
         desc: String(site.desc || '')
       };
@@ -194,6 +196,18 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         showToast('站点 ID 已在本次运行中修复，但未能写入本地存储');
       }
     }
+    if (Array.isArray(storedSiteSource)) {
+      const migration = migrateCheckInDates(storedSiteSource);
+      storedSiteSource = migration.sites;
+      if (migration.changed) {
+        try {
+          localStorage.setItem(STORAGE_KEY_SITES, JSON.stringify(storedSiteSource));
+        } catch (error) {
+          console.error('Unable to persist check-in date migration', error);
+          showToast('签到状态迁移未能写入本地存储');
+        }
+      }
+    }
     const partitionedSites = Array.isArray(storedSiteSource)
       ? partitionSitesForDisplay(storedSiteSource, site => normalizeSite(site, customGroups))
       : { sites: defaultSampleSites, preservedSites: [] };
@@ -202,7 +216,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function persistAppState(nextSites, nextGroups, preservedSites = preservedInvalidSites) {
       persistJsonArraysWithRollback(localStorage, [
-        [STORAGE_KEY_SITES, mergeSitesForPersistence(nextSites, preservedSites)],
+        [STORAGE_KEY_SITES, mergeSitesForPersistence(serializeSitesWithCheckInDate(nextSites), preservedSites)],
         [STORAGE_KEY_GROUPS, nextGroups]
       ]);
     }
@@ -312,6 +326,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     }
 
     function renderSites() {
+      sites = refreshCheckInStatus(sites);
       updateStats();
       const q = document.getElementById('search-input').value.trim().toLowerCase();
       const list = document.getElementById('site-list');
@@ -411,8 +426,10 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     function toggleCheckIn(id) {
       const s = sites.find(item => item.id === id);
       if (!s) return;
-      const checkedInToday = !s.checkedInToday;
-      const nextSites = sites.map(item => item.id === id ? { ...item, checkedInToday } : item);
+      const today = getLocalDateKey();
+      const updatedSite = setCheckInForToday(s, today);
+      const checkedInToday = updatedSite.checkedInToday;
+      const nextSites = sites.map(item => item.id === id ? updatedSite : item);
       if (!saveToStorage(nextSites, customGroups)) return;
 
       if (checkedInToday) {
@@ -658,7 +675,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         nextSites = [{
           id: createNextSiteId(),
           name, url, group, tags, needCheckIn,
-          checkedInToday: false,
+          lastCheckInDate: null,
           notes: validNotes,
           desc
         }, ...sites];
@@ -867,7 +884,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
             group: defaultGroup,
             tags: [folderTag],
             needCheckIn: false,
-            checkedInToday: false,
+            lastCheckInDate: null,
             notes: [
               { label: '便签 1', value: '暂无内容', masked: false }
             ],
@@ -957,7 +974,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       const sep = String.fromCharCode(124);
 
       if (type === 'json') {
-        content = JSON.stringify({ version: '0.3.1', exportedAt: new Date().toISOString(), groups: customGroups, sites }, null, 2);
+        content = JSON.stringify({ version: '0.3.1', exportedAt: new Date().toISOString(), groups: customGroups, sites: serializeSitesWithCheckInDate(sites) }, null, 2);
         filename = `api-vault-backup-${dateStr}.json`;
         mime = 'application/json;charset=utf-8';
       } else {
@@ -1031,6 +1048,10 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     renderCategories();
     renderSites();
     createIcons({ icons: iconSet });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') renderSites();
+    });
 
     Object.assign(globalThis, {
       addCustomGroup, addFormNoteRow, closeDialog, closeExportModal, closeGroupModal, closeGroupPicker,
