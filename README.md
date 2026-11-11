@@ -5,7 +5,7 @@ API Vault 是一个纯本地的站点书签与随手记工具，保留原有单�
 ## 项目现状
 
 - 源码仓库：[https://github.com/AApple0528/api-vault](https://github.com/AApple0528/api-vault)。
-- 当前源码版本为 `0.3.2`
+- 当前版本及 Android versionCode 以 `package.json` 为准；版本更新记录维护在 `CHANGELOG.md`。
 - 保留站点管理、分组、标签、搜索筛选、签到、便签、复制、JSON 导入导出和 Markdown 导出；核心界面的 Tailwind 和 Lucide 使用本地依赖，可离线使用。
 - 原始 `API-Vault.html` 保留不改；现有应用为原生 HTML/CSS/JavaScript，没有迁移 Vue，也没有引入 iOS 工程。
 
@@ -57,7 +57,7 @@ adb install -r android\app\build\outputs\apk\debug\app-debug.apk
 
 ### Debug 签名与诊断日志
 
-当前产物是 Debug APK，Gradle 会使用构建机器上的 Android Debug keystore 自动签名，不是未签名 APK，也尚未配置正式 Release 签名。不同机器或全新 GitHub Actions runner 的 Debug 证书可能不同；CI artifact 只用于构建验证，未经证书比对不能作为已安装版本的覆盖更新包。后续更新应保持现有签名连续性；签名密钥应在仓库外安全保管，不能提交到 Git。改用另一把正式密钥需要单独规划升级兼容性。
+Debug APK 使用项目专用的持久化 Debug keystore 签名，不配置正式 Release 签名。本人本地构建从未跟踪的 `android/signing.properties` 读取配置；GitHub Actions 从以下 Secrets 恢复同一 JKS 到 runner 临时目录，并通过环境变量传给 Gradle：`ANDROID_DEBUG_KEYSTORE_BASE64`、`ANDROID_DEBUG_KEYSTORE_PASSWORD`、`ANDROID_DEBUG_KEY_ALIAS`、`ANDROID_DEBUG_KEY_PASSWORD`。Secrets 缺失会使构建失败，不会回退到默认 Debug keystore；构建后临时密钥文件会清理。不要提交 keystore、`android/signing.properties` 或任何密码。正式发布前仍需单独规划 Release 签名和密钥保管。
 
 保留 `ApiVaultInsets` 与 `ApiVaultTask` 日志：仅在应用具有 `FLAG_DEBUGGABLE` 时启用，记录窗口/视口尺寸、Insets、已知弹窗 ID、生命周期和任务状态，不读取用户输入值、站点内容、URL、便签或 `localStorage`。正式 Release 类型构建不启用这些诊断采样。日志和备份放在本地根目录的 `logs/`、`backups/`，这些目录已被忽略；不要提交个人数据、密钥或设备日志。
 
@@ -138,6 +138,6 @@ Adaptive 图层画布为 108×108 dp，前景限制在中央直径 64 dp 的圆�
 
 GitHub Actions 工作流位于 `.github/workflows/android.yml`，在 main 分支 push / PR 时依次配置 pnpm、Node.js 与 pnpm 缓存，使用锁文件安装依赖，运行测试、生成 Web 资源、同步 Capacitor，再执行 Android Debug 构建、单元测试和 lint。`dist/` 不入库，每次从源码重新生成。Linux 构建前会补上 `gradlew` 的可执行权限。
 
-工作流只上传 Debug APK 到 Actions artifact，由 runner 自动进行 Debug 签名；不创建 Tag、GitHub Release，也不上传 Release 附件。正式发布前应核对包名、版本、SHA-256 与签名证书，特别是与用户已安装版本的证书是否一致。
+工作流只上传使用专用 Debug keystore 签名的 APK 到 Actions artifact；不创建 GitHub Release，也不上传 Release 附件。正式发布前应核对包名、版本、SHA-256 与签名证书，特别是与用户已安装版本的证书是否一致。
 
 项目源码仓库已公开，目前未选择开源许可证，也未配置正式 Release 签名或自动发布流程；本次准备不新增许可证、不发布新版本，也不覆盖已有 `v0.3.0` Release。

@@ -10,3 +10,11 @@ export function siteMatchesFilters(site, { status = '全部', group = null, quer
     (site.tags || []).some(tag => String(tag).toLowerCase().includes(normalizedQuery));
   return matchStatus && matchGroup && matchQuery;
 }
+
+export function selectTopStat(status) {
+  return { status, group: null };
+}
+
+export function selectSiteGroup(group) {
+  return { status: '全部', group: group || null };
+}

@@ -5,8 +5,10 @@ import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { createExportActions, downloadInBrowser, shareInBrowser } from './export-actions.js';
 import { bindLongPressSortable, reorderByIndex, serializeFormNotes } from './sortable.js';
-import { siteMatchesFilters } from './site-filters.js';
+import { selectSiteGroup, selectTopStat, siteMatchesFilters } from './site-filters.js';
 import { createCredentialDisclosureState } from './credential-disclosure.js';
+import { APP_VERSION, APP_VERSION_LABEL } from './app-version.js';
+import { getLatestReleaseNotes } from './changelog.js';
 import { getLocalDateKey, isCheckedInToday, migrateCheckInDates, normalizeCheckInDate, refreshCheckInStatus, serializeSitesWithCheckInDate, setCheckInForToday } from './check-in-state.js';
 import { ensureUniqueSiteIds, migrateStoredSiteIds, toValidSiteId } from './site-ids.js';
 import { getJsonImportFailureDialog, persistJsonArraysWithRollback, prepareAndPersistJsonImport } from './site-import.js';
@@ -257,19 +259,18 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         return `<button onclick="setCategoryByIndex(${tabs.indexOf(cat)})" class="px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition ${ active ? 'bg-text text-card shadow-sm' : 'bg-card border border-border text-muted hover:text-text' }">${escapeHtml(cat)}</button>`;
       }).join('');
 
-      document.getElementById('card-stat-all').classList.toggle('border-accent', currentStatusFilter === '全部' && !currentGroupFilter);
+      document.getElementById('card-stat-all').classList.toggle('border-accent', currentStatusFilter === '全部');
       document.getElementById('card-stat-pending').classList.toggle('border-accent', currentStatusFilter === '待签到');
       document.getElementById('card-stat-done').classList.toggle('border-sage', currentStatusFilter === '已签到');
     }
 
     function setCategory(cat) {
       if (cat === '全部') {
-        currentStatusFilter = '全部';
-        currentGroupFilter = null;
+        ({ status: currentStatusFilter, group: currentGroupFilter } = selectTopStat('全部'));
       } else if (STATUS_FILTER_NAMES.includes(cat)) {
-        currentStatusFilter = cat;
+        ({ status: currentStatusFilter, group: currentGroupFilter } = selectTopStat(cat));
       } else if (customGroups.includes(cat)) {
-        currentGroupFilter = cat;
+        ({ status: currentStatusFilter, group: currentGroupFilter } = selectSiteGroup(cat));
       }
       renderCategories();
       renderGroupPickerList();
@@ -305,6 +306,18 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function copyProjectRepository() {
       copyText(PROJECT_REPOSITORY_URL);
+    }
+
+    function renderReleaseInfo() {
+      const version = document.getElementById('app-version');
+      const content = document.getElementById('changelog-content');
+      const release = getLatestReleaseNotes(APP_VERSION_LABEL);
+      if (version) version.textContent = release?.version || APP_VERSION_LABEL;
+      if (content) {
+        content.innerHTML = release?.changes?.length
+          ? release.changes.map(change => `<li>${escapeHtml(change)}</li>`).join('')
+          : '<li>暂无更新内容</li>';
+      }
     }
 
     function updateStats() {
@@ -745,7 +758,8 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     function selectGroupFromPicker(index) {
       const numericIndex = Number(index);
-      currentGroupFilter = numericIndex < 0 ? null : (customGroups[numericIndex] || null);
+      const group = numericIndex < 0 ? null : (customGroups[numericIndex] || null);
+      ({ status: currentStatusFilter, group: currentGroupFilter } = selectSiteGroup(group));
       closeGroupPicker();
       renderCategories();
       renderSites();
@@ -974,7 +988,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       const sep = String.fromCharCode(124);
 
       if (type === 'json') {
-        content = JSON.stringify({ version: '0.3.1', exportedAt: new Date().toISOString(), groups: customGroups, sites: serializeSitesWithCheckInDate(sites) }, null, 2);
+        content = JSON.stringify({ version: APP_VERSION, exportedAt: new Date().toISOString(), groups: customGroups, sites: serializeSitesWithCheckInDate(sites) }, null, 2);
         filename = `api-vault-backup-${dateStr}.json`;
         mime = 'application/json;charset=utf-8';
       } else {
@@ -1047,6 +1061,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
     renderCategories();
     renderSites();
+    renderReleaseInfo();
     createIcons({ icons: iconSet });
 
     document.addEventListener('visibilitychange', () => {

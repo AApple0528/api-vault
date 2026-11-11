@@ -1,5 +1,41 @@
 apply plugin: 'com.android.application'
 
+def packageMetadata = new groovy.json.JsonSlurper().parseText(file('../../package.json').text)
+def appVersion = packageMetadata.version.toString()
+def appVersionCode = packageMetadata.androidVersionCode as Integer
+def signingPropertiesFile = rootProject.file('signing.properties')
+def signingProperties = new Properties()
+if (signingPropertiesFile.isFile()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+} else {
+    def signingEnvironment = [
+        storeFile: System.getenv('API_VAULT_SIGNING_STORE_FILE'),
+        storeType: System.getenv('API_VAULT_SIGNING_STORE_TYPE'),
+        storePassword: System.getenv('API_VAULT_SIGNING_STORE_PASSWORD'),
+        keyAlias: System.getenv('API_VAULT_SIGNING_KEY_ALIAS'),
+        keyPassword: System.getenv('API_VAULT_SIGNING_KEY_PASSWORD')
+    ]
+    signingEnvironment.each { key, value ->
+        if (value != null) signingProperties.setProperty(key, value)
+    }
+    if (!signingProperties.getProperty('storeFile')?.trim()) {
+        throw new GradleException('Missing android/signing.properties and API_VAULT_SIGNING_* environment configuration. Configure the dedicated Debug keystore before building.')
+    }
+}
+
+def requiredSigningProperties = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+def missingSigningProperties = requiredSigningProperties.findAll { !signingProperties.getProperty(it)?.trim() }
+if (!missingSigningProperties.isEmpty()) {
+    throw new GradleException("Missing required dedicated Debug signing properties: ${missingSigningProperties.join(', ')}")
+}
+
+def storeFilePath = signingProperties.getProperty('storeFile').trim()
+    .replace('${user.home}', System.getProperty('user.home'))
+def debugKeystoreFile = file(storeFilePath)
+if (!debugKeystoreFile.isFile()) {
+    throw new GradleException('The Debug keystore configured by android/signing.properties was not found.')
+}
+
 android {
     namespace "app.apivault.local"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +43,8 @@ android {
         applicationId "app.apivault.local"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "0.3.1"
+        versionCode appVersionCode
+        versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,7 +52,19 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        apiVaultDebug {
+            storeFile debugKeystoreFile
+            storePassword signingProperties.getProperty('storePassword')
+            keyAlias signingProperties.getProperty('keyAlias')
+            keyPassword signingProperties.getProperty('keyPassword')
+            storeType signingProperties.getProperty('storeType', 'JKS').trim()
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.apiVaultDebug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

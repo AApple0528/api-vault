@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { bindLongPressSortable, persistJsonArrays, reorderByIndex, serializeFormNotes } from '../src/sortable.js';
-import { siteMatchesFilters } from '../src/site-filters.js';
+import { selectSiteGroup, selectTopStat, siteMatchesFilters } from '../src/site-filters.js';
 
 test('group order uses one array and preserves every group exactly once', () => {
   const groups = ['主力站', '备用站', '公益站'];
@@ -214,10 +214,47 @@ test('pointercancel restores original order and never commits', async t => {
   assert.equal(items[0].classList.contains('is-sorting'), false);
 });
 
-test('group, check-in status and search filters remain independent and composable', () => {
-  const site = { name: 'Alpha API', url: 'https://alpha.test', group: '主力站', tags: ['模型'], needCheckIn: true, checkedInToday: false };
-  assert.equal(siteMatchesFilters(site, { status: '待签到', group: '主力站', query: '模型' }), true);
-  assert.equal(siteMatchesFilters(site, { status: '已签到', group: '主力站' }), false);
-  assert.equal(siteMatchesFilters(site, { status: '待签到', group: '公益站' }), false);
-  assert.equal(siteMatchesFilters(site, { status: '全部', group: null, query: 'alpha.test' }), true);
+test('top-stat selection clears group while preserving search and applies globally', () => {
+  const sites = [
+    { name: 'Alpha API', url: 'https://alpha.test', group: '主力站', tags: ['模型'], needCheckIn: true, checkedInToday: false },
+    { name: 'Beta API', url: 'https://beta.test', group: '公益站', tags: ['模型'], needCheckIn: true, checkedInToday: false },
+    { name: 'Gamma API', url: 'https://gamma.test', group: '主力站', tags: ['模型'], needCheckIn: false, checkedInToday: false }
+  ];
+  const priorSearch = '模型';
+  const selection = selectTopStat('待签到');
+  const matches = sites.filter(site => siteMatchesFilters(site, { ...selection, query: priorSearch }));
+
+  assert.deepEqual(selection, { status: '待签到', group: null });
+  assert.deepEqual(matches.map(site => site.name), ['Alpha API', 'Beta API']);
+  assert.equal(siteMatchesFilters(sites[1], { ...selectTopStat('已签到'), query: priorSearch }), false);
+  assert.deepEqual(selectTopStat('全部'), { status: '全部', group: null });
+});
+
+test('bottom group tabs and group picker selection both clear check-in status', () => {
+  const sites = [
+    { name: 'Pending', url: 'https://pending.test', group: '主力站', tags: ['模型'], needCheckIn: true, checkedInToday: false },
+    { name: 'Checked', url: 'https://checked.test', group: '主力站', tags: ['模型'], needCheckIn: true, checkedInToday: true },
+    { name: 'Other', url: 'https://other.test', group: '公益站', tags: ['模型'], needCheckIn: true, checkedInToday: false }
+  ];
+  const priorSearch = '模型';
+  const groupTabSelection = selectSiteGroup('主力站');
+  const groupPickerSelection = selectSiteGroup('主力站');
+
+  assert.deepEqual(groupTabSelection, { status: '全部', group: '主力站' });
+  assert.deepEqual(groupPickerSelection, groupTabSelection);
+  assert.deepEqual(sites.filter(site => siteMatchesFilters(site, { ...groupTabSelection, query: priorSearch })).map(site => site.name), ['Pending', 'Checked']);
+  assert.deepEqual(selectSiteGroup(null), { status: '全部', group: null });
+});
+
+test('browse state transitions used by both UI entry points stay wired to actual controls', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+  const setCategory = source.slice(source.indexOf('function setCategory('), source.indexOf('function setCategoryByIndex('));
+  const selectGroupFromPicker = source.slice(source.indexOf('function selectGroupFromPicker('), source.indexOf('function renderGroupPickerList('));
+
+  assert.match(setCategory, /selectTopStat\('全部'\)/);
+  assert.match(setCategory, /selectTopStat\(cat\)/);
+  assert.match(setCategory, /selectSiteGroup\(cat\)/);
+  assert.match(selectGroupFromPicker, /selectSiteGroup\(group\)/);
+  assert.match(source, /currentStatusFilter === '全部'\);/);
 });

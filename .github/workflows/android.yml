@@ -3,6 +3,7 @@ name: Android Debug APK
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -34,17 +35,57 @@ jobs:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Verify release version metadata
+        run: pnpm run check:version
       - name: Run tests
         run: pnpm test
       - name: Build web assets
         run: pnpm run build
       - name: Sync Capacitor Android
         run: pnpm exec cap sync android
-      - name: Build debug APK
+      - name: Restore dedicated Debug keystore
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+          ANDROID_DEBUG_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+          ANDROID_DEBUG_KEY_ALIAS: ${{ secrets.ANDROID_DEBUG_KEY_ALIAS }}
+          ANDROID_DEBUG_KEY_PASSWORD: ${{ secrets.ANDROID_DEBUG_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in ANDROID_DEBUG_KEYSTORE_BASE64 ANDROID_DEBUG_KEYSTORE_PASSWORD ANDROID_DEBUG_KEY_ALIAS ANDROID_DEBUG_KEY_PASSWORD; do
+            if [ -z "${!value}" ]; then
+              echo "Missing required GitHub Secret: ${value}" >&2
+              exit 1
+            fi
+          done
+          signing_dir="$RUNNER_TEMP/api-vault-signing"
+          mkdir -p "$signing_dir"
+          chmod 700 "$signing_dir"
+          printf '%s' "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$signing_dir/api-vault-debug.jks"
+          chmod 600 "$signing_dir/api-vault-debug.jks"
+          test -s "$signing_dir/api-vault-debug.jks"
+          echo "API_VAULT_SIGNING_STORE_FILE=$signing_dir/api-vault-debug.jks" >> "$GITHUB_ENV"
+          echo "API_VAULT_SIGNING_STORE_TYPE=JKS" >> "$GITHUB_ENV"
+      - name: Build debug APK with dedicated signing
+        env:
+          API_VAULT_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+          API_VAULT_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_DEBUG_KEY_ALIAS }}
+          API_VAULT_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_DEBUG_KEY_PASSWORD }}
         working-directory: android
         run: |
+          set -euo pipefail
           chmod +x gradlew
           ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain
+      - name: Verify Debug APK signature
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+          apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          node scripts/verify-apk-signature.js "$apk" "$apksigner"
+      - name: Remove temporary signing material
+        if: ${{ always() }}
+        run: |
+          rm -f "$RUNNER_TEMP/api-vault-signing/api-vault-debug.jks"
+          rmdir "$RUNNER_TEMP/api-vault-signing" 2>/dev/null || true
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:

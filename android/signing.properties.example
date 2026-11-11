@@ -1,0 +1,7 @@
+# Copy this file to android/signing.properties and fill in the local values.
+# Keep passwords only in this ignored local file; never commit it.
+storeFile=${user.home}/.android/api-vault-debug.jks
+storeType=JKS
+storePassword=
+keyAlias=api-vault-debug
+keyPassword=

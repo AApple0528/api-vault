@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { APP_VERSION } from '../src/app-version.js';
 import { serializeSitesWithCheckInDate } from '../src/check-in-state.js';
 import vm from 'node:vm';
 import { createExportActions, downloadInBrowser, shareInBrowser } from '../src/export-actions.js';
@@ -135,7 +136,8 @@ test('actual JSON/Markdown formatters open preview only and leave stored records
   const before = JSON.stringify({ sites, groups });
   const files = [];
   const format = vm.runInNewContext(source.slice(source.indexOf('function exportData('), source.indexOf('function closeExportModal(')) + '\nexportData;', {
-    sites, customGroups: groups, serializeSitesWithCheckInDate, exportActions: { open: file => files.push(file) }
+    sites, customGroups: groups, APP_VERSION, serializeSitesWithCheckInDate,
+    exportActions: { open: file => files.push(file) }
   });
   format('json');
   format('md');
