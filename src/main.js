@@ -1,4 +1,4 @@
-import { createIcons, ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Plus, Search, Settings, ShieldCheck, Trash2, User } from 'lucide';
+import { createIcons, ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Pin, Plus, Search, Settings, ShieldCheck, Trash2, User } from 'lucide';
 import { Browser } from '@capacitor/browser';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
@@ -15,6 +15,7 @@ import { getJsonImportFailureDialog, persistJsonArraysWithRollback, prepareAndPe
 import { clearAllSitesSafely, createUniqueSiteIdForState, mergeSitesForPersistence, partitionSitesForDisplay, persistBeforeCommit } from './site-storage.js';
 import { normalizeCustomGroups, resolveSiteGroup, STATUS_FILTER_NAMES } from './site-groups.js';
 import { isSafeHttpUrl, normalizeHttpUrl, validateGroupName, validateManualSiteUrl } from './site-validation.js';
+import { normalizePinnedState, sortSitesPinnedFirst } from './site-pinning.js';
 
 const DocumentSaver = registerPlugin('DocumentSaver');
 const isAndroid = Capacitor.getPlatform() === 'android';
@@ -97,7 +98,7 @@ document.getElementById('export-share-btn').onclick = exportActions.share;
 document.getElementById('export-download-btn').onclick = exportActions.save;
 if (isAndroid) document.getElementById('export-download-btn').textContent = '保存到文件（不分享）';
 
-const iconSet = { ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Plus, Search, Settings, ShieldCheck, Trash2, User };
+const iconSet = { ArrowUpRight, Bookmark, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, FileUp, FolderInput, GripVertical, ListFilter, Pin, Plus, Search, Settings, ShieldCheck, Trash2, User };
 
 const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     const STORAGE_KEY_GROUPS = 'api_vault_groups_v3';
@@ -181,6 +182,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
         needCheckIn: Boolean(site.needCheckIn),
         lastCheckInDate: normalizeCheckInDate(site),
         checkedInToday: isCheckedInToday(site),
+        pinned: normalizePinnedState(site),
         notes,
         desc: String(site.desc || '')
       };
@@ -344,11 +346,11 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       const q = document.getElementById('search-input').value.trim().toLowerCase();
       const list = document.getElementById('site-list');
 
-      const filtered = sites.filter(site => siteMatchesFilters(site, {
+      const filtered = sortSitesPinnedFirst(sites.filter(site => siteMatchesFilters(site, {
         status: currentStatusFilter,
         group: currentGroupFilter,
         query: q
-      }));
+      })));
 
       if (filtered.length === 0) {
         const filterLabel = [currentGroupFilter, currentStatusFilter !== '全部' ? currentStatusFilter : null].filter(Boolean).join(' · ') || '全部';
@@ -384,7 +386,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
 
           <div class="flex items-center justify-between gap-2 min-w-0">
             <div class="flex flex-wrap items-center gap-1.5 min-w-0">
-              <span class="text-[10px] font-medium px-2 py-0.5 rounded-md bg-bg border border-border text-text">${escapeHtml(site.group)}</span>${(site.tags || []).map(t => `<span class="text-[10px] text-muted px-2 py-0.5 rounded-md bg-bg">#${escapeHtml(t)}</span>`).join('')}
+              <span class="text-[10px] font-medium px-2 py-0.5 rounded-md bg-bg border border-border text-text">${escapeHtml(site.group)}</span>${site.pinned ? '<span class="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-accentLight/60 text-accent"><i data-lucide="pin" class="w-3 h-3"></i>置顶</span>' : ''}${(site.tags || []).map(t => `<span class="text-[10px] text-muted px-2 py-0.5 rounded-md bg-bg">#${escapeHtml(t)}</span>`).join('')}
             </div>
             ${site.notes && site.notes.length > 0 ? `
               <button type="button" onclick="toggleSiteCredentials(${site.id})"
@@ -420,6 +422,9 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
           <div class="flex items-center justify-between pt-1 text-[11px] text-muted border-t border-border/50">
             <span class="truncate pr-3">${escapeHtml(site.desc || '暂无备注')}</span>
             <div class="flex items-center gap-3 shrink-0">
+              <button type="button" onclick="toggleSitePinned(${site.id})" class="inline-flex items-center gap-1 ${site.pinned ? 'text-accent' : 'text-muted hover:text-accent'}" title="${site.pinned ? '取消置顶' : '置顶站点'}" aria-label="${site.pinned ? '取消置顶' : '置顶站点'}">
+                <i data-lucide="pin" class="w-3.5 h-3.5"></i><span>${site.pinned ? '已置顶' : '置顶'}</span>
+              </button>
               <button onclick="openSiteModal(${site.id})" class="text-text hover:text-accent font-medium">编辑</button>
               <button onclick="confirmDeleteSite(${site.id})" class="text-muted hover:text-red-600">删除</button>
             </div>
@@ -434,6 +439,16 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
     function toggleSiteCredentials(siteId) {
       credentialDisclosure.toggle(Number(siteId));
       renderSites();
+    }
+
+    function toggleSitePinned(siteId) {
+      const site = sites.find(item => item.id === siteId);
+      if (!site) return;
+      const pinned = !site.pinned;
+      const nextSites = sites.map(item => item.id === siteId ? { ...item, pinned } : item);
+      if (!saveToStorage(nextSites, customGroups)) return;
+      renderSites();
+      showToast(pinned ? '站点已置顶' : '已取消置顶');
     }
 
     function toggleCheckIn(id) {
@@ -687,7 +702,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       } else {
         nextSites = [{
           id: createNextSiteId(),
-          name, url, group, tags, needCheckIn,
+          name, url, group, tags, needCheckIn, pinned: false,
           lastCheckInDate: null,
           notes: validNotes,
           desc
@@ -898,6 +913,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
             group: defaultGroup,
             tags: [folderTag],
             needCheckIn: false,
+            pinned: false,
             lastCheckInDate: null,
             notes: [
               { label: '便签 1', value: '暂无内容', masked: false }
@@ -1074,7 +1090,7 @@ const STORAGE_KEY_SITES = 'api_vault_sites_v3';
       copyProjectRepository, copySiteNote, copyText, deleteCustomGroup, exportData, handleBookmarkImport,
       handleJsonImport, openGroupModal, openGroupPicker, openSiteLink, openSiteModal, removeFormNoteRow,
       openProjectRepository, renderSites, renameCustomGroup, saveSite, setCategory, setCategoryByIndex,
-      selectGroupFromPicker, switchTab, toggleDefaultMask, toggleCheckIn, toggleNoteMask, toggleSiteCredentials, updateFormNote, triggerBookmarkInput,
+      selectGroupFromPicker, switchTab, toggleDefaultMask, toggleCheckIn, toggleNoteMask, toggleSiteCredentials, toggleSitePinned, updateFormNote, triggerBookmarkInput,
       clearSiteUrlError,
       triggerJsonInput
     });

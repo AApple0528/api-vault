@@ -14,6 +14,8 @@ test('package metadata is the source for UI, backup and Android version values',
   ]);
 
   assert.equal(APP_VERSION, packageJson.version);
+  assert.equal(packageJson.version, '0.3.6');
+  assert.equal(packageJson.androidVersionCode, 4);
   assert.equal(APP_VERSION_LABEL, `v${packageJson.version}`);
   assert.equal(ANDROID_VERSION_CODE, packageJson.androidVersionCode);
   assert.match(gradle, /file\('\.\.\/\.\.\/package\.json'\)/);
@@ -33,15 +35,19 @@ test('changelog parser returns the matching release actual notes and version', a
   assert.equal(releases[0].version, APP_VERSION_LABEL);
   assert.equal(latest.version, APP_VERSION_LABEL);
   assert.ok(latest.changes.length > 0);
-  assert.ok(latest.changes.some(change => change.includes('签到')));
+  assert.ok(latest.changes.some(change => change.includes('置顶')));
 });
 
-test('changelog release version is consistent with the existing release tag', async () => {
-  const { execFileSync } = await import('node:child_process');
-  const tag = execFileSync('git', ['describe', '--tags', '--exact-match', 'v0.3.4'], { encoding: 'utf8' }).trim();
-  const changelog = await readFile(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
-  assert.equal(tag, APP_VERSION_LABEL);
-  assert.equal(findReleaseNotes(changelog, tag)?.version, tag);
+test('version validation accepts the matching release tag for the prepared version', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const script = fileURLToPath(new URL('../scripts/verify-version.js', import.meta.url));
+  const result = spawnSync(process.execPath, [script], {
+    encoding: 'utf8',
+    env: { ...process.env, GITHUB_REF_TYPE: 'tag', GITHUB_REF_NAME: APP_VERSION_LABEL }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /v0\.3\.6.*versionCode 4/);
 });
 
 test('release version verification rejects a tag that differs from package.json', async () => {
@@ -53,5 +59,5 @@ test('release version verification rejects a tag that differs from package.json'
   });
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /does not match package version v0\.3\.4/);
+  assert.match(result.stderr, /does not match package version v0\.3\.6/);
 });

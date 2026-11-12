@@ -1,7 +1,7 @@
 {
   "name": "api-vault",
-  "version": "0.3.4",
-  "androidVersionCode": 3,
+  "version": "0.3.6",
+  "androidVersionCode": 4,
   "private": true,
   "description": "纯本地站点书签与随手记工具",
   "type": "module",
